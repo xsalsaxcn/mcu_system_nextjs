@@ -185,17 +185,19 @@ export default function VaccinationReminderPage() {
   const eventRequestId = useRef(0);
   const [rowActionId, setRowActionId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const summaryRequestSeq = useRef(0);
   const [listDisplay, setListDisplay] = useState<"SIMPLE" | "TABLE">("SIMPLE");
   const [page, setPage] = useState(1);
   const pageSize = 25;
 
-  async function load(view: ViewKey = selectedView) {
+  async function load(view: ViewKey = selectedView, query: string = searchQuery) {
+    const requestSeq = ++summaryRequestSeq.current;
     setLoading(true);
     setError("");
     try {
       const cacheBuster = Date.now();
       const response = await fetch(
-        `/api/vaccination/reminder/summary?view=${encodeURIComponent(view)}&cb=${cacheBuster}`,
+        `/api/vaccination/reminder/summary?view=${encodeURIComponent(view)}&q=${encodeURIComponent(query.trim())}&cb=${cacheBuster}`,
         {
           cache: "no-store",
           headers: {
@@ -207,14 +209,17 @@ export default function VaccinationReminderPage() {
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.message || `HTTP ${response.status}`);
       }
+      if (requestSeq !== summaryRequestSeq.current) return;
       setData(payload);
       setLastSuccessfulLoadAt(
         new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB",
       );
     } catch (e: any) {
-      setError(String(e?.message || e || "Gagal memuat reminder."));
+      if (requestSeq === summaryRequestSeq.current) {
+        setError(String(e?.message || e || "Gagal memuat reminder."));
+      }
     } finally {
-      setLoading(false);
+      if (requestSeq === summaryRequestSeq.current) setLoading(false);
     }
   }
 
@@ -381,12 +386,15 @@ export default function VaccinationReminderPage() {
   }, [eventSessionId]);
 
   useEffect(() => {
-    load(selectedView);
-    const timer = window.setInterval(() => load(selectedView), 60_000);
-    return () => window.clearInterval(timer);
-    // load is intentionally scoped to the active view.
+    // Debounce server-side search; refreshing must retain the active search.
+    const delay = window.setTimeout(() => load(selectedView, searchQuery), searchQuery ? 350 : 0);
+    const timer = window.setInterval(() => load(selectedView, searchQuery), 60_000);
+    return () => {
+      window.clearTimeout(delay);
+      window.clearInterval(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedView]);
+  }, [selectedView, searchQuery]);
 
   const rows = useMemo(() => data?.items || [], [data]);
   const filteredRows = useMemo(() => {
@@ -731,9 +739,13 @@ export default function VaccinationReminderPage() {
                           ? "Untuk jadwal yang belum tersinkron, gunakan 'Sinkronkan Jadwal' di bagian atas. Pantau pengiriman melalui daftar reminder di bawah."
                           : "Belum ada tanggal next dose di data sumber. Panel ini tidak membuat jadwal baru atau mengirim pesan."}
                       </p>
-                      <button type="button" onClick={() => setIncomingGroup("SCHEDULED")}
+                      <button type="button" onClick={() => {
+                          setSearchQuery(clean(selectedEventItem.participant_name));
+                          setIncomingGroup("SCHEDULED");
+                          setPage(1);
+                        }}
                         className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-xs font-black text-sky-800 hover:bg-sky-50">
-                        Lihat daftar reminder
+                        Cari jadwal peserta ini
                       </button>
                     </div>
                   </div>
@@ -753,6 +765,9 @@ export default function VaccinationReminderPage() {
                 <div>
                   <h2 className="text-lg font-black">{viewMeta.title}</h2>
                   <p className="text-sm text-slate-500">{viewMeta.note}</p>
+                  {selectedView === "INCOMING" ? (
+                    <p className="mt-1 text-xs text-slate-500">Pencarian mencakup seluruh jadwal di database untuk 60 hari ke depan, bukan hanya 1.000 jadwal yang dimuat pertama.</p>
+                  ) : null}
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
                   <div className="relative min-w-0 sm:w-[360px]">
@@ -760,7 +775,7 @@ export default function VaccinationReminderPage() {
                       type="search"
                       value={searchQuery}
                       onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Cari nama, perusahaan, vaksin, email, no HP..."
+                      placeholder="Cari seluruh jadwal: nama, perusahaan, vaksin, email, no HP..."
                       className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 pr-10 text-sm font-semibold outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                     {searchQuery ? (
@@ -778,8 +793,8 @@ export default function VaccinationReminderPage() {
                     {loading
                       ? "Memuat..."
                       : searchQuery
-                        ? `${filteredRows.length} dari ${rows.length} data`
-                        : `${rows.length} data ditampilkan`}
+                        ? `${filteredRows.length} hasil pencarian database (maks. 1.000)`
+                        : `${rows.length} jadwal terbaru ditampilkan`}
                   </div>
                 </div>
               </div>
@@ -856,7 +871,7 @@ export default function VaccinationReminderPage() {
                     );
                   })}
                   {!loading && !filteredRows.length ? (
-                    <div className="col-span-full rounded-xl bg-white p-8 text-center text-sm text-slate-500">{searchQuery ? `Tidak ada hasil untuk “${searchQuery}”.` : "Belum ada jadwal pada pilihan ini."}</div>
+                    <div className="col-span-full rounded-xl bg-white p-8 text-center text-sm text-slate-500">{searchQuery ? `Tidak ada jadwal 60 hari yang cocok untuk “${searchQuery}”. Pencarian sudah mencakup database, bukan hanya 1.000 baris pertama. Jika peserta sudah vaksin, lihat “Sudah Divaksin” untuk jadwal di luar 60 hari atau yang belum tersinkron.` : "Belum ada jadwal pada pilihan ini."}</div>
                   ) : null}
                 </div>
               ) : (
@@ -983,7 +998,7 @@ export default function VaccinationReminderPage() {
                     {!loading && !filteredRows.length ? (
                       <tr>
                         <td colSpan={10} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
-                          {searchQuery ? `Tidak ada hasil untuk "${searchQuery}".` : "Tidak ada data pada kategori ini."}
+                          {searchQuery ? `Tidak ada jadwal pada kategori ini untuk "${searchQuery}". Periksa juga peserta Done bila jadwalnya di luar rentang atau belum tersinkron.` : "Tidak ada data pada kategori ini."}
                         </td>
                       </tr>
                     ) : null}

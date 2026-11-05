@@ -44,6 +44,14 @@ export async function GET(req: NextRequest) {
     const from = shiftYmd(today, -30);
     const until = shiftYmd(today, 60);
     const view = normalizeView(req.nextUrl.searchParams.get("view"));
+    // V591: search the database BEFORE the 1,000-row cap. Searching only the
+    // client snapshot hides participants even when their reminders exist.
+    // Restrict PostgREST grammar characters; this is a read-only filter.
+    const searchQuery = clean(req.nextUrl.searchParams.get("q"))
+      .replace(/[^\p{L}\p{N}\s@+_-]/gu, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 80)
+      .trim();
 
     // V583_REMINDER_DASHBOARD_BOUNDED_READER
     // Read only the requested view (<= 1,000 items), NOT thousands of reminder
@@ -100,6 +108,20 @@ export async function GET(req: NextRequest) {
       viewQuery = viewQuery
         .gte("reminder_date", today)
         .in("status", ["PENDING", "FAILED", "SKIPPED", "SENDING"]);
+    }
+
+    // Search across the FULL eligible date window before applying limit(1000).
+    // Counts on the dashboard remain the same, regardless of search terms.
+    if (searchQuery) {
+      const term = `%${searchQuery}%`;
+      viewQuery = viewQuery.or([
+        `participant_name.ilike.${term}`,
+        `vaccine_name.ilike.${term}`,
+        `company_name.ilike.${term}`,
+        `recipient_name.ilike.${term}`,
+        `recipient_email.ilike.${term}`,
+        `recipient_phone.ilike.${term}`,
+      ].join(","));
     }
 
     // Exact same date window as V582 / prior UI. Sort in memory only for
@@ -203,6 +225,8 @@ export async function GET(req: NextRequest) {
         ok: true,
       today,
       view,
+      // q only affects the visible items, never summary counts or send logic.
+      searchApplied: Boolean(searchQuery),
       automation: {
         emailSchedule: ["H7", "H3", "H1", "H0"],
         whatsappSchedule: ["H3", "H1"],
