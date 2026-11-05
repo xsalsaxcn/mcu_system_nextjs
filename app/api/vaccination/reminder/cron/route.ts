@@ -18,9 +18,14 @@ function clean(value: any) {
 }
 
 function cronAuthorized(req: NextRequest) {
-  const secret = clean(process.env.CRON_SECRET);
-  if (!secret) return false;
-  return clean(req.headers.get("authorization")) === `Bearer ${secret}`;
+  const authorization = clean(req.headers.get("authorization"));
+  const reminderSecret = clean(process.env.VACCINATION_REMINDER_CRON_SECRET);
+  const legacySecret = clean(process.env.CRON_SECRET);
+  // Separate token for this endpoint; keep the existing Vercel cron token working.
+  return Boolean(
+    (reminderSecret && authorization === `Bearer ${reminderSecret}`) ||
+    (legacySecret && authorization === `Bearer ${legacySecret}`)
+  );
 }
 
 type Mode = "all" | "sync" | "email" | "wa";
@@ -61,8 +66,8 @@ async function execute(mode: Mode) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!clean(process.env.CRON_SECRET)) {
-    return fail("CRON_SECRET belum dikonfigurasi di environment production.", 503);
+  if (!clean(process.env.VACCINATION_REMINDER_CRON_SECRET) && !clean(process.env.CRON_SECRET)) {
+    return fail("Reminder cron secret belum dikonfigurasi di environment production.", 503);
   }
   if (!cronAuthorized(req)) return fail("Unauthorized cron request.", 401);
   return execute(normalizeMode(req.nextUrl.searchParams.get("mode")));
