@@ -168,6 +168,9 @@ export default function VaccinationValidationPage() {
   const [sessionOptions, setSessionOptions] = useState<SessionOption[]>([]);
   const [companyFilter, setCompanyFilter] = useState("all");
   const [sessionFilter, setSessionFilter] = useState("all");
+  // V584: client-side Session option search only. No changes to saved Session selection.
+  const [sessionSearchField, setSessionSearchField] = useState("all");
+  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [contextLocked, setContextLocked] = useState(false);
   const [cancelRowId, setCancelRowId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -236,11 +239,28 @@ export default function VaccinationValidationPage() {
     ).sort((a, b) => a.localeCompare(b, "id")),
   [sessionOptions]);
 
-  const visibleSessionOptions = useMemo(() =>
-    sessionOptions
+  const visibleSessionOptions = useMemo(() => {
+    const query = clean(sessionSearchQuery).toLocaleLowerCase("id-ID");
+    return sessionOptions
       .filter((item) => companyFilter === "all" || clean(item.company_name) === companyFilter)
-      .sort((a, b) => `${b.session_date || ""}${b.session_id}`.localeCompare(`${a.session_date || ""}${a.session_id}`)),
-  [companyFilter, sessionOptions]);
+      .filter((item) => {
+        if (!query) return true;
+        // The active selection remains in the select even if it does not match
+        // the keyword, so typing never silently changes the locked Session.
+        if (String(item.session_id) === String(sessionFilter)) return true;
+        const fields: Record<string, string> = {
+          session_name: clean(item.session_name),
+          location: clean(item.location),
+          session_date: clean(item.session_date),
+          session_id: String(item.session_id),
+        };
+        const searchable = sessionSearchField === "all"
+          ? Object.values(fields)
+          : [fields[sessionSearchField] || ""];
+        return searchable.some((value) => value.toLocaleLowerCase("id-ID").includes(query));
+      })
+      .sort((a, b) => `${b.session_date || ""}${b.session_id}`.localeCompare(`${a.session_date || ""}${a.session_id}`));
+  }, [companyFilter, sessionOptions, sessionFilter, sessionSearchField, sessionSearchQuery]);
 
   const selectedSession = useMemo(() =>
     sessionOptions.find((item) => String(item.session_id) === String(sessionFilter)) || null,
@@ -617,6 +637,31 @@ export default function VaccinationValidationPage() {
         </div>
 
         <div className="mt-6 rounded-2xl border border-cyan-100 bg-cyan-50/50 p-4">
+          <div className="mb-3 grid gap-2 md:grid-cols-[190px_minmax(200px,1fr)_auto] md:items-center">
+            <select
+              aria-label="Pilih field pencarian Session"
+              className="min-w-0 rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-800"
+              disabled={contextLocked}
+              value={sessionSearchField}
+              onChange={(e) => setSessionSearchField(e.target.value)}
+            >
+              <option value="all">Semua field Session</option>
+              <option value="session_name">Nama Session</option>
+              <option value="location">Lokasi</option>
+              <option value="session_date">Tanggal Session</option>
+              <option value="session_id">ID Session</option>
+            </select>
+            <input
+              type="search"
+              aria-label="Cari Session berdasarkan field yang dipilih"
+              className="min-w-0 rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-500"
+              placeholder="Ketik untuk menyaring pilihan Session..."
+              disabled={contextLocked}
+              value={sessionSearchQuery}
+              onChange={(e) => setSessionSearchQuery(e.target.value)}
+            />
+            <span className="text-xs font-bold text-slate-600">{visibleSessionOptions.length} pilihan Session</span>
+          </div>
           <div className="grid gap-3 lg:grid-cols-[220px_minmax(280px,1fr)_auto]">
             <select
               className="rounded-xl border bg-white px-3 py-3 text-sm font-black"
@@ -634,6 +679,7 @@ export default function VaccinationValidationPage() {
               onChange={(e) => setSessionFilter(e.target.value)}
             >
               <option value="all">Semua Session</option>
+              {visibleSessionOptions.length === 0 && sessionSearchQuery.trim() ? <option disabled value="__no_match">Tidak ada Session cocok</option> : null}
               {visibleSessionOptions.map((session) => (
                 <option key={session.session_id} value={session.session_id}>
                   {session.session_name}{session.location ? ` · ${session.location}` : ""}{session.session_date ? ` · ${session.session_date}` : ""}
