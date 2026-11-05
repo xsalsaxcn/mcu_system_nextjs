@@ -1,0 +1,40 @@
+# Manual-only read-only auth check. Does NOT send reminders.
+name: Vaccination Reminder Auth Check (No Send)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auth-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      REMINDER_BASE_URL: ${{ secrets.VACCINATION_REMINDER_BASE_URL }}
+      REMINDER_CRON_SECRET: ${{ secrets.VACCINATION_REMINDER_CRON_SECRET }}
+    steps:
+      - name: Check production auth - no reminder delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${REMINDER_BASE_URL:-}" || -z "${REMINDER_CRON_SECRET:-}" ]]; then
+            echo "CONFIG ERROR: one or both GitHub reminder Secrets are missing."
+            exit 1
+          fi
+          base="${REMINDER_BASE_URL%/}"
+          # Safety: do not send the token to an untrusted URL.
+          if [[ "$base" != 'https://inharmony-health.vercel.app' ]]; then
+            echo "CONFIG ERROR: base URL is not the expected production domain."
+            exit 1
+          fi
+          status=$(curl --silent --show-error --max-time 25 --output /dev/null \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${REMINDER_CRON_SECRET}" \
+            -H 'Accept: application/json' \
+            "${base}/api/vaccination/reminder/auth-check")
+          echo "Read-only auth status: HTTP $status"
+          if [[ "$status" != 200 ]]; then
+            echo "Auth check failed; no reminders were sent."
+            echo "Inspect Vercel Runtime Logs for VACCINATION_REMINDER_AUTH_CHECK_DENIED."
+            exit 1
+          fi
+          echo "SUCCESS: GitHub token accepted by Vercel. No reminders were sent."
