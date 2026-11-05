@@ -11,7 +11,7 @@ const REMINDER_INTERACTION_VERSION = "V153.13";
 // VACCINATION_REMINDER_MANUAL_SEND_V152_1
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const STATUS_STYLE: Record<string, string> = {
   SENT: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -83,7 +83,7 @@ function fmtDateTime(value: any) {
 
 function channelDeliveryLabel(value: any, channel: "EMAIL" | "WHATSAPP") {
   const status = clean(value).toUpperCase();
-  if (status === "SENT") return "Sukses";
+  if (status === "SENT") return channel === "WHATSAPP" ? "Diterima Notiva*" : "Diterima SMTP*";
   if (status === "FAILED") return "Gagal";
   if (status === "SENDING") return "Sedang diproses";
   if (status === "CANCELLED") return "Dibatalkan";
@@ -156,7 +156,9 @@ export default function VaccinationReminderPage() {
   const [eventLoading, setEventLoading] = useState(false);
   const [eventError, setEventError] = useState("");
   const [eventSessionId, setEventSessionId] = useState<number | null>(null);
-  const [eventPage, setEventPage] = useState(1);
+  const [eventParticipantId, setEventParticipantId] = useState("");
+  const [eventParticipantSearch, setEventParticipantSearch] = useState("");
+  const eventRequestId = useRef(0);
   const [rowActionId, setRowActionId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -218,7 +220,7 @@ export default function VaccinationReminderPage() {
       const result = await postReminderMode("sync");
       setManualMessage(`Jadwal disinkronkan: ${Number(result?.sync?.schedules || 0)} baris aktif. Tidak ada reminder dikirim oleh tindakan ini.`);
       await load(selectedView);
-      await loadCurrentEvent(eventSessionId, eventPage);
+      await loadCurrentEvent(eventSessionId);
     } catch (e: any) {
       setError(`Gagal sinkron jadwal: ${String(e?.message || e)}`);
     } finally {
@@ -261,21 +263,39 @@ export default function VaccinationReminderPage() {
     }
   }
 
-  async function loadCurrentEvent(sessionId: number | null = eventSessionId, requestedPage = eventPage) {
+  async function loadCurrentEvent(sessionId: number | null = eventSessionId) {
+    const requestId = ++eventRequestId.current;
     setEventLoading(true);
     setEventError("");
     try {
-      const params = new URLSearchParams({ page: String(requestedPage), cb: String(Date.now()) });
-      if (sessionId) params.set("session_id", String(sessionId));
-      const response = await fetch(`/api/vaccination/reminder/current-event?${params}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
-      setEventData(payload);
-      if (sessionId == null && payload.sessionId) setEventSessionId(Number(payload.sessionId));
+      const fetchEventPage = async (pageNo: number) => {
+        const params = new URLSearchParams({ page: String(pageNo), cb: String(Date.now()) });
+        if (sessionId) params.set("session_id", String(sessionId));
+        const response = await fetch(`/api/vaccination/reminder/current-event?${params}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+        return payload;
+      };
+      const first = await fetchEventPage(1);
+      const fullList: any[] = [...(first.items || [])];
+      const total = Number(first.total || 0);
+      const pageSize = Number(first.pageSize || 25);
+      // Each request retains the existing read-only endpoint limit (25 rows).
+      // Keep this bounded to avoid an expensive unlimited production query.
+      const pages = Math.min(20, Math.ceil(total / Math.max(1, pageSize)));
+      for (let number = 2; number <= pages; number += 1) {
+        if (eventRequestId.current !== requestId) return;
+        const next = await fetchEventPage(number);
+        fullList.push(...(next.items || []));
+      }
+      if (eventRequestId.current !== requestId) return;
+      setEventData({ ...first, items: fullList, partiallyLoaded: total > fullList.length });
+      setEventParticipantId((previous) => fullList.some((item) => String(item.id) === previous) ? previous : "");
+      if (sessionId == null && first.sessionId) setEventSessionId(Number(first.sessionId));
     } catch (e: any) {
-      setEventError(String(e?.message || e || "Gagal membaca peserta Done di Current Event."));
+      if (eventRequestId.current === requestId) setEventError(String(e?.message || e || "Gagal membaca peserta Done di Current Event."));
     } finally {
-      setEventLoading(false);
+      if (eventRequestId.current === requestId) setEventLoading(false);
     }
   }
 
@@ -310,8 +330,11 @@ export default function VaccinationReminderPage() {
       }
       const emailSent = Boolean(payload?.email?.sent);
       const waSent = Boolean(payload?.whatsapp?.sent);
-      const emailText = emailSent ? "Sukses" : payload?.email?.error ? "Gagal" : "Tidak terkirim";
-      const waText = waSent ? "Sukses" : payload?.whatsapp?.error ? "Gagal" : "Tidak terkirim";
+      const emailText = emailSent ? "diterima layanan SMTP (delivery belum diverifikasi)" : payload?.email?.error ? "Gagal" : "Tidak terkirim";
+      const waMessageId = clean(payload?.whatsapp?.meta_message_id);
+      const waText = waSent
+        ? `diterima Notiva (delivery belum diverifikasi${waMessageId ? `; Meta ID: ${waMessageId}` : "; Meta ID tidak tersedia"})`
+        : payload?.whatsapp?.error ? "Gagal" : "Tidak terkirim";
       setManualMessage(
         action === "send"
           ? `Reminder ${participant} selesai diproses · Via Email = ${emailText} · WhatsApp = ${waText}.`
@@ -326,9 +349,9 @@ export default function VaccinationReminderPage() {
   }
 
   useEffect(() => {
-    loadCurrentEvent(eventSessionId, eventPage);
+    loadCurrentEvent(eventSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventSessionId, eventPage]);
+  }, [eventSessionId]);
 
   useEffect(() => {
     load(selectedView);
@@ -376,6 +399,15 @@ export default function VaccinationReminderPage() {
   }, [selectedView, searchQuery]);
 
   const viewMeta = VIEW_META[selectedView];
+  const eventItems: any[] = eventData?.items || [];
+  const filteredEventItems = eventItems.filter((item: any) =>
+    [item.participant_name, item.employee_id, item.vaccine_name, item.registration_id]
+      .map((value) => clean(value).toLowerCase()).join(" ")
+      .includes(clean(eventParticipantSearch).toLowerCase()),
+  );
+  const selectedEventItem = eventItems.find((item: any) => String(item.id) === eventParticipantId);
+  const eventWithoutNextDose = eventItems.filter((item: any) => !item.next_due_date).length;
+  const eventWithNextDose = eventItems.filter((item: any) => Boolean(item.next_due_date)).length;
 
   return (
     <main className="min-h-screen bg-[#f4f8fb] p-4 text-slate-900 md:p-6">
@@ -489,6 +521,7 @@ export default function VaccinationReminderPage() {
               {manualMessage}
             </div>
           ) : null}
+          <p className="mt-3 text-xs leading-5 text-slate-500">* Status Email/WhatsApp selesai diproses berarti layanan pengiriman menerima permintaan, bukan bukti pesan sudah delivered/read. Periksa penerima dan ID pesan sebelum mencoba kirim ulang.</p>
 
           {error ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -503,78 +536,142 @@ export default function VaccinationReminderPage() {
         </section>
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 p-5">
+          <div className="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-lg font-black">Current Event · Peserta Sudah Done</h2>
-              <p className="mt-1 text-sm text-slate-500">Dibaca langsung dari catatan tindakan vaksin yang selesai. Series dan non-series tetap tampil, termasuk yang belum memiliki next dose.</p>
-              <div className="mt-2 text-xs font-bold text-slate-600">{eventLoading ? "Memuat..." : `${Number(eventData?.total || 0)} tindakan vaksin selesai pada Session terpilih (bukan jumlah peserta unik).`}</div>
+              <h2 className="text-lg font-black">Current Event · Peserta Sudah Divaksin</h2>
+              <p className="mt-1 text-sm text-slate-600">Pilih peserta untuk melihat ringkasan dosis dan jadwal pengingat. Tidak ada pesan yang dikirim dari panel ini.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <select
-                aria-label="Pilih Current Event"
+                aria-label="Pilih event untuk peserta Done"
                 value={eventSessionId || ""}
-                onChange={(event) => { const id = Number(event.target.value) || null; setEventSessionId(id); setEventPage(1); }}
-                className="max-w-[440px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+                onChange={(event) => {
+                  setEventSessionId(Number(event.target.value) || null);
+                  setEventParticipantId("");
+                  setEventParticipantSearch("");
+                }}
+                className="w-full max-w-[470px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold lg:w-[380px]"
               >
                 {!(eventData?.sessions || []).length ? <option value="">Belum ada Session</option> : null}
                 {(eventData?.sessions || []).map((session: any) => (
-                  <option key={session.id} value={session.id}>{session.session_name || `Session ${session.id}`} · {session.location || ""} · {session.session_date || ""}</option>
+                  <option key={session.id} value={session.id}>
+                    {session.session_name || `Session ${session.id}`} · {session.location || ""} · {session.session_date || ""}
+                  </option>
                 ))}
               </select>
-              <button type="button" disabled={eventLoading} onClick={() => loadCurrentEvent(eventSessionId, eventPage)}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black disabled:opacity-40">Refresh Done</button>
+              <button type="button" disabled={eventLoading} onClick={() => loadCurrentEvent(eventSessionId)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black hover:bg-slate-50 disabled:opacity-40">Refresh Data</button>
             </div>
           </div>
           {eventError ? <div className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700">{eventError}</div> : null}
-          <div className="overflow-x-auto">
-            <table className="min-w-[1120px] w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-600"><tr>
-                <th className="px-3 py-3">Peserta</th><th className="px-3 py-3">Vaksin</th><th className="px-3 py-3">Dosis</th>
-                <th className="px-3 py-3">Tanggal Done</th><th className="px-3 py-3">Series / Non-series</th>
-                <th className="px-3 py-3">Next Dose</th><th className="px-3 py-3">Reminder Berikutnya</th>
-                <th className="px-3 py-3">Jadwal & Status Email / WA</th>
-              </tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {(eventData?.items || []).map((item: any) => (
-                  <tr key={item.id} className="align-top">
-                    <td className="px-3 py-3"><div className="font-black">{item.participant_name || "-"}</div><div className="text-slate-500">{item.employee_id || `Registrasi ${item.registration_id}`}</div></td>
-                    <td className="px-3 py-3 font-semibold">{item.vaccine_name || "-"}</td>
-                    <td className="px-3 py-3">Dosis {item.dose_number}</td>
-                    <td className="px-3 py-3">{fmtDateTime(item.administered_at)}</td>
-                    <td className="px-3 py-3">{item.series_type === "SERIES" ? "Series" : item.series_type === "NON_SERIES" ? "Non-series" : "Belum diklasifikasikan"}</td>
-                    <td className="px-3 py-3 font-semibold">{item.next_due_date ? fmtDate(item.next_due_date) : <span className="text-amber-700">Belum ada jadwal</span>}</td>
-                    <td className="px-3 py-3">{item.next_reminder_date ? fmtDate(item.next_reminder_date) : "Belum terjadwal"}</td>
-                    <td className="px-3 py-3">
-                      {item.reminder_schedule?.length ? (
-                        <div className="flex flex-wrap gap-1.5">{item.reminder_schedule.map((r: any) => (
-                          <span key={r.stage} title={`Email: ${r.email_status} · WA: ${r.wa_status} · ${r.persisted ? "Tercatat" : "Belum disinkronkan"}`}
-                            className={`rounded-lg border px-2 py-1 ${r.persisted ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-                            {stageLabel(r.stage)} {fmtDate(r.reminder_date)} · E:{r.email_status} · WA:{r.wa_status}
-                          </span>
-                        ))}</div>
-                      ) : <span className="text-slate-500">{item.schedule_note || "Tidak ada reminder"}</span>}
-                    </td>
-                  </tr>
-                ))}
-                {!eventLoading && !(eventData?.items || []).length ? <tr><td colSpan={8} className="px-5 py-7 text-center text-slate-500">Belum ada tindakan vaksin Done pada Session ini.</td></tr> : null}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
-            <p className="text-xs text-slate-500">Jadwal H-7 / H-3 / H-1 / Hari H adalah tanggal estimasi berdasarkan next due yang tercatat. Status kirim ditampilkan hanya jika sudah ada baris reminder.</p>
-            <div className="flex items-center gap-2">
-              <button type="button" disabled={eventLoading || eventPage <= 1}
-                onClick={() => setEventPage((page) => Math.max(1, page - 1))}
-                className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Sebelumnya</button>
-              <span className="text-xs font-bold">{eventPage} / {Math.max(1, Math.ceil(Number(eventData?.total || 0) / 25))}</span>
-              <button type="button" disabled={eventLoading || eventPage * 25 >= Number(eventData?.total || 0)}
-                onClick={() => setEventPage((page) => page + 1)}
-                className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Berikutnya</button>
+          <div className="p-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-bold text-slate-500">Tindakan vaksin Done</div>
+                <div className="mt-1 text-2xl font-black">{eventLoading ? "…" : Number(eventData?.total || 0)}</div>
+                <div className="text-xs text-slate-500">Jumlah tindakan, bukan peserta unik</div>
+              </div>
+              <div className="rounded-2xl border border-sky-100 bg-sky-50 p-4">
+                <div className="text-xs font-bold text-sky-800">Memiliki next dose</div>
+                <div className="mt-1 text-2xl font-black">{eventLoading ? "…" : eventWithNextDose}</div>
+                <div className="text-xs text-sky-700">Berdasarkan tanggal yang tercatat</div>
+              </div>
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                <div className="text-xs font-bold text-amber-900">Belum ada tanggal lanjutan</div>
+                <div className="mt-1 text-2xl font-black">{eventLoading ? "…" : eventWithoutNextDose}</div>
+                <div className="text-xs text-amber-800">Tidak otomatis berarti data salah</div>
+              </div>
             </div>
+            {eventData?.partiallyLoaded ? (
+              <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                Daftar dibatasi ke 500 tindakan untuk menjaga performa; {eventItems.length} dari {Number(eventData.total || 0)} tindakan sudah dimuat. Tidak ada data yang diubah.
+              </p>
+            ) : null}
+            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <label className="block text-sm font-black text-slate-700">
+                Cari peserta Done
+                <input type="search" value={eventParticipantSearch} onChange={(event) => { setEventParticipantSearch(event.target.value); setEventParticipantId(""); }}
+                  placeholder="Ketik nama, BINUSIAN ID atau vaksin..."
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100" />
+              </label>
+              <label className="block text-sm font-black text-slate-700">
+                Pilih peserta untuk melihat detail
+                <select value={eventParticipantId} onChange={(event) => setEventParticipantId(event.target.value)}
+                  disabled={eventLoading || !filteredEventItems.length}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold disabled:opacity-50">
+                  <option value="">{eventLoading ? "Memuat data..." : filteredEventItems.length ? `Pilih dari ${filteredEventItems.length} tindakan` : "Tidak ada peserta sesuai pencarian"}</option>
+                  {filteredEventItems.map((item: any) => (
+                    <option key={item.id} value={String(item.id)}>
+                      {item.participant_name || "Tanpa nama"} · {item.vaccine_name || "Vaksinasi"} · Dosis {item.dose_number} · {item.employee_id || `Reg ${item.registration_id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {selectedEventItem ? (
+              <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/40 p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-black text-slate-900">{selectedEventItem.participant_name || "Peserta"}</div>
+                    <div className="mt-1 text-sm text-slate-600">{selectedEventItem.employee_id || `Registrasi ${selectedEventItem.registration_id}`} · {selectedEventItem.vaccine_name || "Vaksinasi"} · Dosis {selectedEventItem.dose_number}</div>
+                    <div className="mt-1 text-xs text-slate-500">Vaksin diberikan: {fmtDateTime(selectedEventItem.administered_at)}</div>
+                  </div>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai divaksin</span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-white bg-white p-3">
+                    <div className="text-xs font-bold text-slate-500">Jenis dosis</div>
+                    <div className="mt-1 text-sm font-black">{selectedEventItem.series_type === "SERIES" ? "Series" : selectedEventItem.series_type === "NON_SERIES" ? "Non-series" : "Belum diklasifikasikan"}</div>
+                  </div>
+                  <div className="rounded-xl border border-white bg-white p-3">
+                    <div className="text-xs font-bold text-slate-500">Tanggal dosis berikutnya</div>
+                    <div className="mt-1 text-sm font-black">{selectedEventItem.next_due_date ? fmtDate(selectedEventItem.next_due_date) : "Belum ada jadwal"}</div>
+                  </div>
+                  <div className="rounded-xl border border-white bg-white p-3">
+                    <div className="text-xs font-bold text-slate-500">Reminder berikutnya</div>
+                    <div className="mt-1 text-sm font-black">{selectedEventItem.next_reminder_date ? fmtDate(selectedEventItem.next_reminder_date) : "Belum terjadwal"}</div>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-xl border border-white bg-white p-4">
+                  <div className="text-sm font-black">Jadwal reminder</div>
+                  {selectedEventItem.reminder_schedule?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {selectedEventItem.reminder_schedule.map((reminder: any) => (
+                        <div key={reminder.stage} className="flex flex-col gap-1 border-b border-slate-100 pb-2 last:border-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="text-sm font-semibold">{stageLabel(reminder.stage)} · {fmtDate(reminder.reminder_date)}</div>
+                          <div className="text-xs leading-5 text-slate-600 sm:text-right">
+                            {!reminder.persisted ? "Belum disinkronkan — belum masuk antrean kirim" : (
+                              <>Email: {channelDeliveryLabel(reminder.email_status, "EMAIL")} · WhatsApp: {channelDeliveryLabel(reminder.wa_status, "WHATSAPP")}</>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-amber-800">{selectedEventItem.schedule_note || "Belum ada jadwal reminder karena tanggal dosis berikutnya belum tercatat."}</p>
+                  )}
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="max-w-3xl text-xs leading-5 text-slate-600">
+                    {selectedEventItem.next_due_date
+                      ? "Untuk jadwal yang belum tersinkron, gunakan 'Sinkronkan Jadwal' di bagian atas. Pantau pengiriman melalui daftar reminder di bawah."
+                      : "Belum ada tanggal next dose di data sumber. Panel ini tidak membuat jadwal baru atau mengirim pesan."}
+                  </p>
+                  <button type="button" onClick={() => document.getElementById("vaccination-reminder-list")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-xs font-black text-sky-800 hover:bg-sky-50">
+                    Lihat daftar reminder
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+                Pilih salah satu peserta di dropdown untuk melihat riwayat tindakan, dosis berikutnya, dan kapan reminder dijadwalkan. Tidak ada pengiriman otomatis dari pilihan ini.
+              </div>
+            )}
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <section id="vaccination-reminder-list" className="scroll-mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-black">{viewMeta.title}</h2>
