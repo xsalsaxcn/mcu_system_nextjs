@@ -28,6 +28,9 @@ export default function VaccinationIserveExportPage() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [skippedNames, setSkippedNames] = useState<string[]>([]);
   const [totalAppointments, setTotalAppointments] = useState(0);
+  const [totalRegistrations, setTotalRegistrations] = useState(0);
+  const [withoutFinalItems, setWithoutFinalItems] = useState(0);
+  const [perVaccineTotals, setPerVaccineTotals] = useState<any[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +94,9 @@ export default function VaccinationIserveExportPage() {
         setSkippedCount(Number(json.skipped_count || 0));
         setSkippedNames(json.skipped_names || []);
         setTotalAppointments(Number(json.total_appointments || 0));
+        setTotalRegistrations(Number(json.registration_count || 0));
+        setWithoutFinalItems(Number(json.without_final_item_count || 0));
+        setPerVaccineTotals(json.per_vaccine_totals || []);
       } catch (e: any) {
         if (!cancelled) {
           setError(e?.message || "Gagal membaca batch kombinasi.");
@@ -258,6 +264,34 @@ export default function VaccinationIserveExportPage() {
               </div>
             </div>
           </div>
+
+          <section className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 p-5">
+            <h2 className="text-base font-black text-sky-950">Rekap penerima per vaksin — termasuk semua kombinasi</h2>
+            <p className="mt-1 text-xs leading-5 text-sky-900">Angka batch di bawah adalah <strong>exact combination</strong>, bukan total orang yang menerima satu vaksin. Rekap ini menghitung registrasi final yang memuat vaksin tersebut, termasuk bila bersama produk lain. Nama Healthday/Bazar digabung untuk tampilan rekap saja; identitas produk, stok, dan file ekspor tetap terpisah. Satu peserta bisa punya lebih dari satu registrasi.</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-sky-900">
+              <span className="rounded-lg bg-white px-3 py-2">Registrasi aktif di Session: {totalRegistrations}</span>
+              <span className="rounded-lg bg-white px-3 py-2">Registrasi dengan item vaksin final: {totalAppointments}</span>
+              <span className="rounded-lg bg-white px-3 py-2">Belum memiliki item final: {withoutFinalItems}</span>
+            </div>
+            {perVaccineTotals.length ? (
+              <div className="mt-3 overflow-x-auto rounded-xl border border-sky-100 bg-white">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Vaksin</th><th className="p-3">Registrasi yang menerima</th><th className="p-3">Varian produk operasional</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {perVaccineTotals.map((item: any) => (
+                      <tr key={item.vaccine}>
+                        <td className="p-3 font-bold">{item.vaccine}</td>
+                        <td className="p-3 font-black">{item.registration_count}</td>
+                        <td className="p-3 text-xs text-slate-500">{(item.variants || []).join(" / ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-slate-600">Belum ada item vaksin final untuk rekap Session ini.</p>
+            )}
+          </section>
 
           {skippedCount > 0 ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">

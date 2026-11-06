@@ -58,6 +58,13 @@ function itemBenefit(item: any) {
   };
 }
 
+// Display-only grouping for operational totals. NEVER modifies exact-combination
+// export keys or product/lot ownership. Bazar/Healthday suffix is removed only
+// for the overview label; physical products stay distinct in the export.
+function reportingProductLabel(value: any) {
+  return clean(value).replace(/\s*[-–]\s*(BAZAR|HEALTHDAY)\s*$/i, "").replace(/\s+/g, " ").trim().toLocaleUpperCase("id-ID");
+}
+
 function buildCombination(items: any[]) {
   const byKey = new Map<string, any>();
   for (const item of items) {
@@ -209,8 +216,36 @@ async function loadSessionBatchData(supabase: any, sessionId: number) {
     groups.get(combo.key)!.registrations.push(registration);
   }
 
+  // Read-only reconciliation: count all noncancelled registrations and those
+  // with at least one administered final item. Do not silently treat every
+  // validation "Selesai" row as an exported vaccination.
+  const productSummaryMap = new Map<string, {
+    label: string; registrationIds: Set<number>; productVariants: Set<string>;
+  }>();
+  for (const group of groups.values()) {
+    for (const benefit of group.benefits || []) {
+      const label = reportingProductLabel(benefit.label);
+      if (!label) continue;
+      if (!productSummaryMap.has(label)) productSummaryMap.set(label, {
+        label, registrationIds: new Set<number>(), productVariants: new Set<string>(),
+      });
+      const summary = productSummaryMap.get(label)!;
+      summary.productVariants.add(clean(benefit.label));
+      for (const reg of group.registrations || []) summary.registrationIds.add(Number(reg.id));
+    }
+  }
+  const perVaccineTotals = Array.from(productSummaryMap.values()).map((item) => ({
+    vaccine: item.label,
+    registration_count: item.registrationIds.size,
+    variants: Array.from(item.productVariants).sort(),
+  })).sort((a, b) => b.registration_count - a.registration_count || a.vaccine.localeCompare(b.vaccine, "id"));
+
   return {
     session: sessionResult.data,
+    registration_count: registrations.length,
+    ready_registration_count: doneRegistrations.length,
+    without_final_item_count: Math.max(0, registrations.length - doneRegistrations.length),
+    per_vaccine_totals: perVaccineTotals,
     groups: Array.from(groups.values()).sort((a: any, b: any) => {
       if (b.registrations.length !== a.registrations.length) {
         return b.registrations.length - a.registrations.length;
@@ -381,6 +416,11 @@ export async function GET(req: NextRequest) {
           .slice(0, 12),
         sales_options: pricingRowsForBenefits(group.benefits || [], salesMap),
       })),
+      // Overview only. These do not alter export grouping or file contents.
+      registration_count: data.registration_count,
+      ready_registration_count: data.ready_registration_count,
+      without_final_item_count: data.without_final_item_count,
+      per_vaccine_totals: data.per_vaccine_totals,
       skipped_count: data.skipped.length,
       skipped_names: data.skipped
         .map((row: any) => clean(row.participant_name))

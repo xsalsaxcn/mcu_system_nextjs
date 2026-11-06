@@ -125,6 +125,53 @@ function stageLabel(value: any) {
   return stage || "-";
 }
 
+
+// V593: Presentation only. A card combines stages and known future dose dates
+// only when the participant identity and product can be matched safely.
+function reminderCardsByIdentity(rows: any[]) {
+  type DoseGroup = { due: string; reminders: any[] };
+  type ParticipantGroup = {
+    key: string; participant: string; company: string; vaccine: string;
+    source: string; identityNote: string; doses: DoseGroup[];
+  };
+  const cards = new Map<string, ParticipantGroup>();
+  for (const row of rows) {
+    const source = clean(row.source_type).toUpperCase();
+    const personId = Number(row.person_id || 0);
+    const registrationId = Number(row.registration_id || 0);
+    const recordId = Number(row.record_id || 0);
+    // Never merge people using BINUSIAN ID, name, email or phone. These can overlap.
+    const identity = source === "HISTORY_SERVICE" && personId > 0
+      ? `history-person:${personId}`
+      : source === "CURRENT_RECORD" && registrationId > 0
+        ? `current-registration:${registrationId}`
+        : `individual-source:${clean(row.source_key) || `reminder-${row.id}`}`;
+    const vaccine = clean(row.vaccine_name) || "Vaksinasi";
+    const key = `${identity}|vaccine:${vaccine.toLocaleLowerCase("id-ID")}`;
+    if (!cards.has(key)) cards.set(key, {
+      key, participant: clean(row.participant_name) || "Peserta",
+      company: clean(row.company_name), vaccine,
+      source, identityNote: source === "HISTORY_SERVICE" ? "Riwayat Layanan" : "Vaksinasi saat ini",
+      doses: [],
+    });
+    const card = cards.get(key)!;
+    const due = clean(row.next_due_date) || "tanpa-tanggal";
+    let dose = card.doses.find((entry) => entry.due === due);
+    if (!dose) { dose = { due, reminders: [] }; card.doses.push(dose); }
+    dose.reminders.push(row);
+  }
+  const stageOrder: Record<string, number> = { H7: 0, H3: 1, H1: 2, H0: 3 };
+  for (const card of cards.values()) {
+    card.doses.sort((a, b) => a.due.localeCompare(b.due));
+    for (const dose of card.doses) {
+      dose.reminders.sort((a, b) =>
+        (stageOrder[clean(a.reminder_stage).toUpperCase()] ?? 10) -
+        (stageOrder[clean(b.reminder_stage).toUpperCase()] ?? 10) || Number(a.id) - Number(b.id));
+    }
+  }
+  return Array.from(cards.values()).sort((a, b) => a.participant.localeCompare(b.participant, "id"));
+}
+
 function StatCard({
   label,
   value,
@@ -441,6 +488,14 @@ export default function VaccinationReminderPage() {
       .includes(clean(eventParticipantSearch).toLowerCase()),
   );
   const selectedEventItem = eventItems.find((item: any) => String(item.id) === eventParticipantId);
+  const combinedCards = useMemo(() => reminderCardsByIdentity(filteredRows), [filteredRows]);
+  const cardPageCount = Math.max(1, Math.ceil(combinedCards.length / pageSize));
+  const visibleCardPage = Math.min(page, cardPageCount);
+  const pagedCards = useMemo(() => combinedCards.slice((visibleCardPage - 1) * pageSize, visibleCardPage * pageSize), [combinedCards, visibleCardPage]);
+  const displayCount = listDisplay === "SIMPLE" ? combinedCards.length : filteredRows.length;
+  const displayPage = listDisplay === "SIMPLE" ? visibleCardPage : currentPage;
+  const displayTotalPages = listDisplay === "SIMPLE" ? cardPageCount : totalPages;
+  useEffect(() => { setPage(1); }, [listDisplay]);
   const eventWithoutNextDose = eventItems.filter((item: any) => !item.next_due_date).length;
   const eventWithNextDose = eventItems.filter((item: any) => Boolean(item.next_due_date)).length;
 
@@ -772,65 +827,77 @@ export default function VaccinationReminderPage() {
                 </div>
               </div>
               {listDisplay === "SIMPLE" ? (
-                <div className="grid gap-3 bg-slate-50/60 p-4 lg:grid-cols-2">
-                  {pagedRows.map((row: any) => {
-                    const status = clean(row.status).toUpperCase();
-                    const waStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
-                    const busy = rowActionId === Number(row.id);
-                    const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(waStatus);
-                    const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || waStatus === "SENT";
-                    return (
-                      <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <h3 className="text-base font-black text-slate-900">{row.participant_name || "Peserta"}</h3>
-                            <p className="mt-1 text-xs text-slate-500">{row.company_name || "Perusahaan belum tersedia"}</p>
-                          </div>
-                          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-sky-800">{stageLabel(row.reminder_stage)}</span>
+                <div className="space-y-3 bg-slate-50/60 p-4">
+                  <p className="text-xs text-slate-600">Satu kartu per profil peserta dan vaksin, dengan seluruh dosis berikutnya dan tahap pengingat yang tercatat. Nama atau BINUSIAN ID yang sama tidak otomatis menggabungkan dua profil berbeda.</p>
+                  {pagedCards.map((card) => (
+                    <article key={card.key} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-base font-black text-slate-900">{card.participant}</h3>
+                          <p className="mt-1 text-xs text-slate-600">{card.vaccine} · {card.company || "Perusahaan belum tersedia"}</p>
                         </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                          <div className="col-span-2 rounded-xl bg-slate-50 p-3">
-                            <div className="text-xs text-slate-500">Vaksin / layanan</div>
-                            <div className="mt-0.5 font-bold">{row.vaccine_name || "-"}</div>
-                            <div className="mt-1 text-xs text-slate-500">{row.source_type === "HISTORY_SERVICE" ? "Berdasarkan riwayat layanan" : "Berdasarkan tindakan saat ini"}</div>
-                          </div>
-                          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">Tanggal pengingat</div><div className="font-bold">{fmtDate(row.reminder_date)}</div></div>
-                          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">Dosis berikutnya</div><div className="font-bold">{fmtDate(row.next_due_date)}</div></div>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                          <span className={`rounded-full border px-3 py-1 font-bold ${STATUS_STYLE[status] || STATUS_STYLE.PENDING}`}>Email: {operatorStatus(status, "EMAIL")}</span>
-                          <span className={`rounded-full border px-3 py-1 font-bold ${STATUS_STYLE[waStatus] || STATUS_STYLE.NOT_APPLICABLE}`}>WhatsApp: {operatorStatus(waStatus, "WHATSAPP")}</span>
-                        </div>
-                        <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
-                          <strong>Yang perlu dilakukan:</strong> {operatorAdvice(row)}
-                        </div>
-                        <details className="mt-3 rounded-xl border border-slate-200 p-3">
-                          <summary className="cursor-pointer text-sm font-bold text-sky-800">Periksa detail & tindakan</summary>
-                          <div className="mt-3 space-y-2 text-xs text-slate-700">
-                            <p><strong>Penerima:</strong> {row.recipient_name || row.participant_name || "-"}{row.recipient_type === "PARENT" ? " (Orang tua / wali)" : ""}</p>
-                            <p><strong>Email:</strong> {row.recipient_email || "Belum tersedia"}</p>
-                            <p><strong>Nomor WA:</strong> {row.recipient_phone || "Belum tersedia"}</p>
-                            {row.last_reminder_at ? <p><strong>Terakhir diproses:</strong> {fmtDateTime(row.last_reminder_at)}</p> : null}
-                            {row.error_message ? <p className="text-rose-700"><strong>Alasan gagal Email:</strong> {row.error_message}</p> : null}
-                            {row.wa_error_message ? <p className="text-rose-700"><strong>Alasan gagal WA:</strong> {row.wa_error_message}</p> : null}
-                            <p className="rounded-lg bg-rose-50 p-2 text-rose-900">Pastikan jadwal masih relevan. Peserta yang sudah menerima vaksin yang sama mungkin masih memiliki reminder dari History.</p>
-                            <div className="flex flex-wrap gap-2 pt-2">
-                              <button type="button" onClick={() => runRowAction(row, "send")} disabled={sendDisabled}
-                                className="rounded-lg bg-emerald-700 px-3 py-2 font-bold text-white disabled:opacity-40">
-                                {busy ? "Memproses..." : "Kirim manual (setelah cek)"}
-                              </button>
-                              <button type="button" onClick={() => runRowAction(row, "cancel")} disabled={cancelDisabled}
-                                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-800 disabled:opacity-40">
-                                Batalkan jadwal
-                              </button>
+                        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-800">{card.doses.length} jadwal dosis</span>
+                      </div>
+                      <p className="mt-2 text-[11px] text-slate-500">Sumber: {card.identityNote} · Hanya jadwal yang tersedia pada kategori dan rentang pencarian ini.</p>
+                      <div className="mt-3 space-y-3">
+                        {card.doses.map((dose, doseIndex) => {
+                          // For current vaccination records, infer the NEXT dose number only
+                          // from a matching administered event record in the selected session.
+                          const linked = dose.reminders.find((item: any) => Number(item.record_id || 0) > 0);
+                          const event = linked ? eventItems.find((item: any) =>
+                            Number(item.id || 0) === Number(linked.record_id) &&
+                            Number(item.registration_id || 0) === Number(linked.registration_id || 0) &&
+                            clean(item.vaccine_name).toLocaleLowerCase("id-ID") === card.vaccine.toLocaleLowerCase("id-ID")) : null;
+                          const nextDoseNumber = event && clean(event.series_type).toUpperCase() === "SERIES" && Number(event.dose_number || 0) > 0
+                            ? Number(event.dose_number) + 1 : null;
+                          return (
+                            <div key={`${card.key}-${dose.due}-${doseIndex}`} className="overflow-hidden rounded-xl border border-slate-200">
+                              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-3">
+                                <span className="text-sm font-black text-slate-900">{nextDoseNumber ? `Dosis ${nextDoseNumber}` : `Dosis berikutnya${card.doses.length > 1 ? ` · jadwal ${doseIndex + 1}` : ""}`}</span>
+                                <span className="text-sm font-bold text-slate-700">{dose.due === "tanpa-tanggal" ? "Tanggal belum tersedia" : fmtDate(dose.due)}</span>
+                              </div>
+                              <div className="divide-y divide-slate-100">
+                                {dose.reminders.map((row: any) => {
+                                  const status = clean(row.status).toUpperCase();
+                                  const waStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
+                                  const busy = rowActionId === Number(row.id);
+                                  const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(waStatus);
+                                  const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || waStatus === "SENT";
+                                  return (
+                                    <div key={row.id} className="px-3 py-3 text-xs">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <span className="font-black text-slate-900">Pengingat {stageLabel(row.reminder_stage)} · {fmtDate(row.reminder_date)}</span>
+                                        <span className="text-slate-600">Email: {operatorStatus(status, "EMAIL")} · WhatsApp: {operatorStatus(waStatus, "WHATSAPP")}</span>
+                                      </div>
+                                      {(status === "FAILED" || waStatus === "FAILED") ? (
+                                        <p className="mt-1 text-rose-700">Gagal diproses. Periksa penerima sebelum mengirim ulang.</p>
+                                      ) : null}
+                                      <details className="mt-2 rounded-lg border border-slate-100 px-2 py-2">
+                                        <summary className="cursor-pointer font-semibold text-sky-800">Lihat penerima dan tindakan tahap ini</summary>
+                                        <div className="mt-2 space-y-1 text-slate-600">
+                                          <p>Penerima: {row.recipient_name || row.participant_name || "-"}{row.recipient_type === "PARENT" ? " (Orang tua / wali)" : ""}</p>
+                                          <p>Email: {row.recipient_email || "Belum tersedia"} · WhatsApp: {row.recipient_phone || "Belum tersedia"}</p>
+                                          <p>{operatorAdvice(row)}</p>
+                                          <div className="flex flex-wrap gap-2 pt-2">
+                                            <button type="button" disabled={sendDisabled} onClick={() => runRowAction(row, "send")}
+                                              className="rounded-lg bg-emerald-700 px-3 py-2 font-bold text-white disabled:opacity-40">Kirim manual (setelah cek)</button>
+                                            <button type="button" disabled={cancelDisabled} onClick={() => runRowAction(row, "cancel")}
+                                              className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-700 disabled:opacity-40">Batalkan jadwal</button>
+                                          </div>
+                                        </div>
+                                      </details>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        </details>
-                      </article>
-                    );
-                  })}
-                  {!loading && !filteredRows.length ? (
-                    <div className="col-span-full rounded-xl bg-white p-8 text-center text-sm text-slate-500">{searchQuery ? `Tidak ada jadwal 60 hari yang cocok untuk “${searchQuery}”. Pencarian sudah mencakup database, bukan hanya 1.000 baris pertama. Jika peserta sudah vaksin, lihat “Sudah Divaksin” untuk jadwal di luar 60 hari atau yang belum tersinkron.` : "Belum ada jadwal pada pilihan ini."}</div>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  ))}
+                  {!loading && !combinedCards.length ? (
+                    <div className="rounded-xl bg-white p-8 text-center text-sm text-slate-500">{searchQuery ? `Tidak ada jadwal pada kategori ini untuk “${searchQuery}”. Periksa peserta Done atau pilihan kategori.` : "Belum ada jadwal pada kategori ini."}</div>
                   ) : null}
                 </div>
               ) : (
@@ -968,26 +1035,26 @@ export default function VaccinationReminderPage() {
 
               <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs font-bold text-slate-500">
-                  {filteredRows.length
-                    ? `Menampilkan ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, filteredRows.length)} dari ${filteredRows.length} data`
+                  {displayCount
+                    ? `Menampilkan ${(displayPage - 1) * pageSize + 1}-${Math.min(displayPage * pageSize, displayCount)} dari ${displayCount} ${listDisplay === "SIMPLE" ? "kartu peserta-vaksin" : "jadwal"}`
                     : "0 data"}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setPage((value) => Math.max(1, value - 1))}
-                    disabled={currentPage <= 1}
+                    disabled={displayPage <= 1}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ← Previous
                   </button>
                   <div className="min-w-[110px] text-center text-xs font-black text-slate-600">
-                    Page {currentPage} / {totalPages}
+                    Page {displayPage} / {displayTotalPages}
                   </div>
                   <button
                     type="button"
-                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((value) => Math.min(displayTotalPages, value + 1))}
+                    disabled={displayPage >= displayTotalPages}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Next →
