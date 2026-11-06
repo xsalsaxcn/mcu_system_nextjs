@@ -875,6 +875,53 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // V611: Add one manual BatchName mapping only. No session re-sync, inventory,
+  // participant change, existing mapping overwrite, or queue modification.
+  if (action === "add-batch-mapping") {
+    const sessionId = toInt(body.sessionId, 0);
+    const sourceBatchName = clean(body.sourceBatchName);
+    const vaccineId = toInt(body.vaccineId, 0);
+    const lotId = toInt(body.lotId, 0);
+    const doseNumber = toInt(body.doseNumber, 1);
+    if (!sessionId || !sourceBatchName || sourceBatchName.length > 160 ||
+        !vaccineId || !lotId || doseNumber < 1 || doseNumber > 20) {
+      return fail("Isi BatchName, vaksin dan Lot yang benar.", 400);
+    }
+    const sessionRead = await supabase.from("vaccination_sessions")
+      .select("id,source_id,company_name").eq("id", sessionId).maybeSingle();
+    if (sessionRead.error) return fail(sessionRead.error.message, 500);
+    if (!sessionRead.data) return fail("Session tidak ditemukan.", 404);
+    const assignment = await supabase.from("vaccination_session_vaccines")
+      .select("id,session_id,vaccine_id,lot_id,dose_number,active")
+      .eq("session_id", sessionId).eq("vaccine_id", vaccineId)
+      .eq("lot_id", lotId).eq("dose_number", doseNumber)
+      .eq("active", true).limit(1);
+    if (assignment.error) return fail(assignment.error.message, 500);
+    if (!(assignment.data || []).length) return fail("Vaksin/Lot belum aktif pada Session ini. Mapping tidak disimpan.", 409);
+    try {
+      await validateSessionLotOwnership(supabase, clean(sessionRead.data.company_name),
+        [{ vaccineId, lotId, doseNumber }], sessionId);
+    } catch (error: any) {
+      return fail(error?.message || "Lot tidak dimiliki Session ini.", 409);
+    }
+    const existing = await supabase.from("vaccination_session_batch_mappings")
+      .select("id,source_batch_name,active")
+      .eq("session_id", sessionId).limit(10000);
+    if (existing.error) return fail(existing.error.message, 500);
+    if ((existing.data || []).some((row: any) =>
+      clean(row.source_batch_name).toLowerCase() === sourceBatchName.toLowerCase())) {
+      return fail("BatchName sudah mempunyai mapping. Tidak ada data yang ditimpa.", 409);
+    }
+    const added = await supabase.from("vaccination_session_batch_mappings")
+      .insert({ session_id: sessionId, source_id: toInt(sessionRead.data.source_id, 0) || null,
+        source_batch_name: sourceBatchName, vaccine_id: vaccineId, lot_id: lotId,
+        dose_number: doseNumber, active: true })
+      .select("id,source_batch_name,vaccine_id,lot_id,dose_number").single();
+    if (added.error) return fail(added.error.message, 409);
+    return ok({ message: `Mapping ${sourceBatchName} berhasil ditambahkan tanpa mengubah mapping lama.`,
+      mapping: added.data });
+  }
+
   // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
   if (action === "sync-session-config") {
     const sessionId = toInt(body.sessionId || body.id, 0);
