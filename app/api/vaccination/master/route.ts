@@ -128,6 +128,185 @@ async function stockOwnershipFromBody(
   };
 }
 
+// V600_AUTO_SESSION_SERVICE_ALLOCATION_ON_MASTER_SAVE
+// Stock allocations are a service-level reservation of a Session-owned Lot.
+// The Master write is the only place this reconciliation is invoked.
+// Never infer a service from a product name or use an allocation belonging to another Session.
+type MasterAutoAllocationPlan = {
+  sessionId: number;
+  vaccineId: number;
+  lotId: number;
+  serviceMode: "HEALTHDAY" | "BAZAR";
+  allocatedQty: number;
+  existingId: number;
+  unchanged: boolean;
+};
+
+async function prepareMasterAutoAllocation(
+  supabase: any,
+  input: {
+    ownership: Record<string, any>;
+    vaccineId: number;
+    lotId?: number;
+    stockInitial: number;
+    stockAdded: number;
+    stockUsed: number;
+    previousTotal: number;
+    preferredMode?: any;
+  },
+): Promise<MasterAutoAllocationPlan | null> {
+  if (input.ownership.stock_scope !== "SESSION") return null;
+  const sessionId = Number(input.ownership.stock_session_id || 0);
+  const lotId = Number(input.lotId || 0);
+  if (!sessionId || !input.vaccineId) throw new Error("Session dan produk Lot wajib valid sebelum alokasi otomatis.");
+  const total = input.stockInitial + input.stockAdded;
+  if (!Number.isSafeInteger(total) || total < 0) throw new Error("Jumlah stok Lot tidak valid.");
+  if (total < input.stockUsed) throw new Error("Stok total tidak boleh di bawah jumlah yang sudah dipakai.");
+  // A catalog-only clone (stock 0) must NEVER allocate inventory.
+  if (total === 0 && (!lotId || input.previousTotal === 0)) return null;
+
+  const [sessionResult, assignmentsResult, allocationsResult] = await Promise.all([
+    supabase.from("vaccination_sessions").select("id,company_name,status")
+      .eq("id", sessionId).maybeSingle(),
+    supabase.from("vaccination_session_product_assignments")
+      .select("service_mode,active").eq("session_id", sessionId)
+      .eq("vaccine_id", input.vaccineId).eq("active", true),
+    lotId
+      ? supabase.from("vaccination_session_stock_allocations")
+          .select("id,session_id,vaccine_id,lot_id,service_mode,allocated_qty,active")
+          .eq("lot_id", lotId)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (sessionResult.error) throw new Error(sessionResult.error.message);
+  if (!sessionResult.data) throw new Error("Session pemilik Lot tidak ditemukan.");
+  if (String(sessionResult.data.status || "").toUpperCase() === "CANCELLED") {
+    throw new Error("Tidak boleh membuat alokasi pada Session yang dibatalkan.");
+  }
+  if (
+    normalizeCompanyName(sessionResult.data.company_name) !==
+    normalizeCompanyName(input.ownership.stock_company_name)
+  ) throw new Error("Perusahaan Lot tidak sama dengan pemilik Session.");
+  if (assignmentsResult.error) throw new Error(assignmentsResult.error.message);
+  if (allocationsResult.error) throw new Error(allocationsResult.error.message);
+
+  const allocationRows = allocationsResult.data || [];
+  if (lotId) {
+    // A Lot with historical stock-out/transfer may have less usable stock than
+    // stock_initial + stock_added. Do not silently re-open that stock as quota.
+    const movementsResult = await supabase.from("vaccination_inventory_movements")
+      .select("movement_type,qty").eq("lot_id", lotId).limit(10000);
+    if (movementsResult.error) throw new Error(movementsResult.error.message);
+    const unsafeOutTypes = new Set([
+      "STOCK_TRANSFER_OUT", "ADJUSTMENT_OUT", "STOCK_OUT_ADJUSTMENT",
+      "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "TRANSFER_OUT",
+      "STOCK_TRANSFER_SERVICE",
+    ]);
+    if ((movementsResult.data || []).some((row: any) =>
+      unsafeOutTypes.has(clean(row.movement_type).toUpperCase()) &&
+      Math.abs(Number(row.qty || 0)) > 0
+    )) {
+      throw new Error("Lot pernah mengalami pengurangan/transfer stok. Alokasi otomatis ditahan agar stok terpakai tidak terhitung ulang.");
+    }
+    if ((movementsResult.data || []).length >= 10000) {
+      throw new Error("Riwayat movement Lot melebihi batas audit; alokasi otomatis ditahan.");
+    }
+  }
+  for (const row of allocationRows) {
+    if (Number(row.session_id || 0) !== sessionId || Number(row.vaccine_id || 0) !== input.vaccineId) {
+      throw new Error("Safety stop: Lot memiliki alokasi di Session/produk lain. Periksa relasi, jangan pindahkan stok otomatis.");
+    }
+  }
+  const allowedModes = new Set<string>(
+    (assignmentsResult.data || []).map((row: any) => clean(row.service_mode).toUpperCase())
+      .filter((mode: string) => mode === "HEALTHDAY" || mode === "BAZAR"),
+  );
+  const allocatedModes = new Set<string>(
+    allocationRows.map((row: any) => clean(row.service_mode).toUpperCase())
+      .filter((mode: string) => mode === "HEALTHDAY" || mode === "BAZAR"),
+  );
+  const positiveModes = new Set<string>(
+    allocationRows.filter((row: any) => row.active !== false && Number(row.allocated_qty || 0) > 0)
+      .map((row: any) => clean(row.service_mode).toUpperCase()),
+  );
+  const preferred = clean(input.preferredMode).toUpperCase();
+  const isExplicit = preferred === "HEALTHDAY" || preferred === "BAZAR";
+  let chosen = "";
+  if (isExplicit && (allowedModes.has(preferred) || allocatedModes.has(preferred))) chosen = preferred;
+  else if (positiveModes.size === 1) chosen = Array.from(positiveModes)[0];
+  else if (allocatedModes.size === 1) chosen = Array.from(allocatedModes)[0];
+  else if (allowedModes.size === 1) chosen = Array.from(allowedModes)[0];
+  if (chosen !== "HEALTHDAY" && chosen !== "BAZAR") {
+    throw new Error("Layanan Lot tidak tunggal/ambigu. Pilih Healthday atau Bazar di Master sebelum menyimpan stok awal.");
+  }
+  if (allowedModes.size && !allowedModes.has(chosen)) {
+    throw new Error("Layanan alokasi tidak cocok dengan assignment produk aktif pada Session.");
+  }
+  if (!allowedModes.has(chosen) && !allocatedModes.has(chosen)) {
+    throw new Error("Produk belum terhubung ke layanan Session yang dipilih. Simpan assignment produk terlebih dahulu.");
+  }
+  const target = allocationRows.find((row: any) => clean(row.service_mode).toUpperCase() === chosen);
+  const otherQty = allocationRows
+    .filter((row: any) => clean(row.service_mode).toUpperCase() !== chosen)
+    .reduce((sum: number, row: any) => sum + Math.max(0, Number(row.allocated_qty || 0)), 0);
+  if (otherQty > total) throw new Error("Jatah layanan lain melebihi stok Lot saat ini; perubahan otomatis ditahan.");
+  const oldQty = Math.max(0, Number(target?.allocated_qty || 0));
+  const delta = total - input.previousTotal;
+  const maxTarget = total - otherQty;
+  const newQty = oldQty === 0
+    ? maxTarget
+    : delta > 0
+      ? Math.min(maxTarget, oldQty + delta)
+      : Math.min(oldQty, maxTarget);
+  if (newQty <= 0 && (!target || Number(target.allocated_qty || 0) === 0)) return null;
+  // A reduction to zero must deactivate the old quota, not leave it available.
+
+  // When reducing a stock value, do not lower the quota below administered items.
+  if (lotId && newQty < oldQty) {
+    const usedResult = await supabase.from("vaccination_registration_items")
+      .select("id,service_mode").eq("lot_id", lotId).eq("active", true)
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"]).limit(20000);
+    if (usedResult.error) throw new Error(usedResult.error.message);
+    const usedService = (usedResult.data || []).filter(
+      (row: any) => normalizeServiceMode(row.service_mode) === chosen,
+    ).length;
+    if ((usedResult.data || []).length >= 20000) throw new Error("Audit pemakaian terlalu besar; update stok ditahan.");
+    if (newQty < usedService) throw new Error("Alokasi baru lebih kecil dari dosis layanan yang sudah diberikan.");
+  }
+  if (newQty + otherQty > total) throw new Error("Safety stop: alokasi layanan melebihi stok Lot.");
+  return {
+    sessionId, vaccineId: input.vaccineId, lotId,
+    serviceMode: chosen as "HEALTHDAY" | "BAZAR",
+    allocatedQty: newQty,
+    existingId: Number(target?.id || 0),
+    unchanged: !!target && Number(target.allocated_qty || 0) === newQty && target.active !== false,
+  };
+}
+
+async function applyMasterAutoAllocation(
+  supabase: any,
+  plan: MasterAutoAllocationPlan | null,
+  lotId: number,
+  createdBy: string,
+) {
+  if (!plan || plan.unchanged) return;
+  if (!lotId) throw new Error("Lot ID belum tersedia untuk alokasi otomatis.");
+  const result = await supabase.from("vaccination_session_stock_allocations")
+    .upsert({
+      session_id: plan.sessionId,
+      vaccine_id: plan.vaccineId,
+      lot_id: lotId,
+      service_mode: plan.serviceMode,
+      allocated_qty: plan.allocatedQty,
+      low_stock_threshold: Math.min(5, plan.allocatedQty),
+      dedicated: true,
+      active: plan.allocatedQty > 0,
+      notes: "Alokasi otomatis dari penyimpanan stok awal Master V600",
+      created_by: createdBy,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "session_id,lot_id,service_mode" });
+  if (result.error) throw new Error("Alokasi otomatis gagal: " + result.error.message);
+}
+
 function isStockQuantImportedLot(lot: any) {
   const note = clean(lot?.inventory_notes).toLowerCase();
   return note.includes("import odoo_stock_quant") || note.includes("import stock.quant");
@@ -2140,6 +2319,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const initialQty = Math.max(0, toInt(body.stockInitial, 0));
+    const addedQty = Math.max(0, toInt(body.stockAdded, 0));
+    let autoPlan: MasterAutoAllocationPlan | null = null;
+    try {
+      autoPlan = await prepareMasterAutoAllocation(supabase, {
+        ownership, vaccineId, stockInitial: initialQty, stockAdded: addedQty,
+        stockUsed: 0, previousTotal: 0, preferredMode: body.serviceMode,
+      });
+    } catch (error: any) {
+      return fail(error?.message || "Alokasi otomatis gagal diperiksa.", 409);
+    }
+
     const result = await supabase
       .from("vaccination_vaccine_lots")
       .insert({
@@ -2160,9 +2351,19 @@ export async function POST(req: NextRequest) {
     if (result.error) return fail(result.error.message, 500);
 
     const createdBy = (user as any).email || (user as any).name || (user as any).id || "system";
+    try {
+      await applyMasterAutoAllocation(supabase, autoPlan, Number(result.data.id), createdBy);
+    } catch (allocationError: any) {
+      // A fresh Lot is not yet referenced or moved; remove it on allocation failure.
+      const reverted = await supabase.from("vaccination_vaccine_lots").delete().eq("id", result.data.id);
+      return fail(
+        reverted.error
+          ? `KRITIS: alokasi gagal dan rollback Lot juga gagal. Lot ${result.data.id} harus diperiksa manual: ${allocationError?.message || "Unknown"}`
+          : `Lot tidak disimpan karena alokasi otomatis gagal: ${allocationError?.message || "Unknown"}`,
+        500,
+      );
+    }
     const movements = [];
-    const initialQty = Math.max(0, toInt(body.stockInitial, 0));
-    const addedQty = Math.max(0, toInt(body.stockAdded, 0));
     if (initialQty) movements.push({ vaccine_id: vaccineId, lot_id: result.data.id, movement_type: "initial", qty: initialQty, reference_type: "vaccine_lot", reference_id: result.data.id, notes: "Jumlah awal lot", created_by: createdBy });
     if (addedQty) movements.push({ vaccine_id: vaccineId, lot_id: result.data.id, movement_type: "stock_in", qty: addedQty, reference_type: "vaccine_lot", reference_id: result.data.id, notes: clean(body.inventoryNotes) || "Tambahan stok", created_by: createdBy });
     if (movements.length) await supabase.from("vaccination_inventory_movements").insert(movements);
@@ -2316,7 +2517,7 @@ export async function POST(req: NextRequest) {
 
     const beforeResult = await supabase
       .from("vaccination_vaccine_lots")
-      .select("id,vaccine_id,stock_initial,stock_added,stock_scope,stock_company_name,stock_session_id")
+      .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes,stock_scope,stock_company_name,stock_session_id,updated_at")
       .eq("id", lotId)
       .maybeSingle();
 
@@ -2351,6 +2552,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let autoPlan: MasterAutoAllocationPlan | null = null;
+    try {
+      autoPlan = await prepareMasterAutoAllocation(supabase, {
+        ownership,
+        vaccineId: Number(beforeResult.data.vaccine_id || 0),
+        lotId,
+        stockInitial: nextInitial,
+        stockAdded: nextAdded,
+        stockUsed: Math.max(0, Number(beforeResult.data.stock_used || 0)),
+        previousTotal: beforeInitial + beforeAdded,
+        preferredMode: body.serviceMode,
+      });
+    } catch (error: any) {
+      return fail(error?.message || "Alokasi otomatis gagal diperiksa.", 409);
+    }
+
     const result = await supabase
       .from("vaccination_vaccine_lots")
       .update({
@@ -2370,6 +2587,36 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (result.error) return fail(result.error.message, 500);
+
+    try {
+      await applyMasterAutoAllocation(
+        supabase, autoPlan, lotId,
+        (user as any).email || (user as any).name || (user as any).id || "system",
+      );
+    } catch (allocationError: any) {
+      // Best-effort rollback with a write-version guard; do not create stock movements.
+      const previous = beforeResult.data as any;
+      const rollback = await supabase.from("vaccination_vaccine_lots").update({
+        lot_number: previous.lot_number,
+        expiry_date: previous.expiry_date,
+        stock_initial: previous.stock_initial,
+        stock_added: previous.stock_added,
+        stock_used: previous.stock_used,
+        stock_physical_count: previous.stock_physical_count,
+        inventory_notes: previous.inventory_notes,
+        stock_scope: previous.stock_scope,
+        stock_company_name: previous.stock_company_name,
+        stock_session_id: previous.stock_session_id,
+        updated_at: previous.updated_at,
+      }).eq("id", lotId).eq("updated_at", result.data.updated_at).select("id");
+      const rollbackFailed = !!rollback.error || !(rollback.data || []).length;
+      return fail(
+        rollbackFailed
+          ? `KRITIS: alokasi otomatis gagal dan stok Lot ${lotId} perlu rekonsiliasi manual: ${allocationError?.message || "Unknown"}`
+          : `Perubahan stok ditarik kembali karena alokasi otomatis gagal: ${allocationError?.message || "Unknown"}`,
+        500,
+      );
+    }
 
     const initialDelta = nextInitial - beforeInitial;
     if (initialDelta !== 0) {

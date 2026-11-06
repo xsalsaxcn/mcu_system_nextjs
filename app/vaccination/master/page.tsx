@@ -699,6 +699,7 @@ export default function VaccinationMasterPage() {
             expiryDate: lotForm.expiryDate,
             stockInitial: lotForm.stockInitial,
             stockAdded: lotForm.stockAdded,
+            serviceMode: serviceStockEditorMode,
             stockPhysicalCount: lotForm.stockPhysicalCount,
             inventoryNotes: lotForm.inventoryNotes,
             stockScope: lotForm.stockScope,
@@ -712,6 +713,7 @@ export default function VaccinationMasterPage() {
           const lotJson = await postMaster({
             action: "create-lot",
             ...lotForm,
+            serviceMode: serviceStockEditorMode,
             vaccineId,
             lotNumber,
             expectedStockSessionId:
@@ -737,41 +739,8 @@ export default function VaccinationMasterPage() {
               stockSessionFilter !== "ALL" ? Number(stockSessionFilter) : undefined,
           });
 
-          // V509: a newly saved exact-Session Lot must immediately belong to
-          // the selected Healthday/Bazar bucket. Previously the Lot was saved
-          // but service allocation stayed empty, making valid stock disappear
-          // from filters and Registration.
-          const existingServiceRows = serviceStockAllocations.filter(
-            (row) =>
-              row.active !== false &&
-              String(row.lot_id || "") === String(savedLotId) &&
-              String(row.session_id || "") === String(lotForm.stockSessionId),
-          );
-          const existingSavedLot = lots.find(
-            (row) => String(row.id || "") === String(savedLotId),
-          );
-          const usedBefore = Math.max(
-            0,
-            Number(existingSavedLot?.stock_used || 0),
-          );
-
-          if (!existingServiceRows.length && usedBefore === 0) {
-            const totalToBind = Math.max(
-              0,
-              Number(lotForm.stockInitial || 0) +
-                Number(lotForm.stockAdded || 0),
-            );
-            await postMaster({
-              action: "save-session-service-stock",
-              lotId: savedLotId,
-              sessionId: lotForm.stockSessionId,
-              companyName: lotForm.stockCompanyName,
-              healthdayQty:
-                serviceStockEditorMode === "HEALTHDAY" ? totalToBind : 0,
-              bazarQty:
-                serviceStockEditorMode === "BAZAR" ? totalToBind : 0,
-            });
-          }
+          // V600: Master API now performs the server-side allocation during Lot save.
+          // Do not issue a second client-side split that can overwrite an existing mode.
 
           setMessage(
             `Lot Session tersimpan dan stok otomatis masuk ke ${serviceModeLabel(serviceStockEditorMode)}. Form sudah dikosongkan.`,
@@ -1038,6 +1007,13 @@ export default function VaccinationMasterPage() {
       packageOffer ? String(Math.max(2, Number(packageOffer.package_dose_count || 3))) : "3",
     );
     setPackagePrice(packageOffer ? String(packageOffer.price ?? "") : "");
+    const existingLotMode = serviceStockAllocations
+      .filter((row) => row.active !== false && Number(row.lot_id || 0) === Number(lot.id || 0)
+        && Number(row.allocated_qty || 0) > 0)
+      .map((row) => String(row.service_mode || "HEALTHDAY").toUpperCase());
+    if (new Set(existingLotMode).size === 1) {
+      setServiceStockEditorMode(existingLotMode[0] === "BAZAR" ? "BAZAR" : "HEALTHDAY");
+    }
     setLotForm({
       vaccineId,
       lotNumber: cleanText(lot.lot_number),
