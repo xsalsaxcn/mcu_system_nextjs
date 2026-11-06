@@ -126,6 +126,9 @@ export default function VaccinationMasterPage() {
   // V576_MASTER_MODAL_TABLE_FIRST — UI-only state (no DB/schema changes)
   const [masterEditorOpen, setMasterEditorOpen] = useState(false);
   const [masterTablePage, setMasterTablePage] = useState(1);
+  // V610: batch allocation is opt-in; never silently reallocate existing lots.
+  const [bulkSelectedLotIds, setBulkSelectedLotIds] = useState<string[]>([]);
+  const [bulkAllocationBusy, setBulkAllocationBusy] = useState(false);
 
   const [editingMappingId, setEditingMappingId] = useState("");
   const [editingMappingVaccineId, setEditingMappingVaccineId] = useState("");
@@ -2194,6 +2197,68 @@ export default function VaccinationMasterPage() {
         : [{ vaccine, lot: null }];
     });
   }, [filteredVaccines, filteredMasterLots]);
+  // V610: only new, unallocated, session-owned lots with an explicit service
+  // assignment can be bulk allocated. Previously allocated or used lots are
+  // intentionally excluded so live-event balances cannot be overwritten.
+  function bulkAllocationPlan(row: { vaccine: any; lot: any }) {
+    const { vaccine, lot } = row;
+    const sessionId = Number(stockSessionFilter || 0);
+    const company = normalizeCompany(stockFilter);
+    const mode = productServiceFilter;
+    if (
+      !serviceStockReady || !sessionProductAssignmentReady ||
+      !sessionId || stockSessionFilter === "ALL" ||
+      !company || stockFilter === "ALL" || stockFilter === "GENERAL" ||
+      (mode !== "HEALTHDAY" && mode !== "BAZAR") ||
+      !vaccine || vaccine.active === false || !lot || lot.active === false ||
+      lotScope(lot) !== "SESSION" ||
+      Number(lot.stock_session_id || 0) !== sessionId ||
+      normalizeCompany(lot.stock_company_name) !== company ||
+      Number(lot.stock_used || 0) !== 0
+    ) return null;
+
+    const assignedModes = new Set(
+      sessionProductAssignments
+        .filter((assignment) =>
+          assignment.active !== false &&
+          Number(assignment.session_id || 0) === sessionId &&
+          Number(assignment.vaccine_id || 0) === Number(vaccine.id || 0),
+        )
+        .map((assignment) => String(assignment.service_mode || "HEALTHDAY").toUpperCase()),
+    );
+    if (!assignedModes.has(mode)) return null;
+
+    const currentHD = serviceAllocationQty(lot.id, sessionId, "HEALTHDAY");
+    const currentBazar = serviceAllocationQty(lot.id, sessionId, "BAZAR");
+    const existingTarget = mode === "HEALTHDAY" ? currentHD : currentBazar;
+    if (existingTarget > 0) return null; // idempotent: never add twice
+    const remaining = Math.max(
+      0,
+      Number(lot.stock_initial || 0) +
+        Number(lot.stock_added || 0) -
+        Number(lot.stock_used || 0),
+    );
+    const otherQty = mode === "HEALTHDAY" ? currentBazar : currentHD;
+    const quantity = remaining - otherQty;
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) return null;
+    return {
+      lotId: String(lot.id),
+      vaccineId: String(vaccine.id),
+      vaccineName: String(vaccine.name || "Vaksin"),
+      lotNumber: String(lot.lot_number || lot.id),
+      sessionId,
+      companyName: stockFilter,
+      mode,
+      quantity,
+      remaining,
+      existingHD: currentHD,
+      existingBazar: currentBazar,
+      stockInitial: Number(lot.stock_initial || 0),
+      stockAdded: Number(lot.stock_added || 0),
+      stockUsed: Number(lot.stock_used || 0),
+    };
+  }
+
   const masterPageSize = 6;
   const masterTotalPages = Math.max(1, Math.ceil(masterTableRows.length / masterPageSize));
   const safeMasterPage = Math.min(masterTablePage, masterTotalPages);
@@ -2201,9 +2266,110 @@ export default function VaccinationMasterPage() {
     (safeMasterPage - 1) * masterPageSize,
     safeMasterPage * masterPageSize,
   );
+  const bulkVisibleEligibleIds = masterVisibleRows
+    .filter((row) => !!bulkAllocationPlan(row))
+    .map((row) => String(row.lot.id));
+  const bulkEligibleLotIds = new Set(
+    masterTableRows.filter((row) => !!bulkAllocationPlan(row)).map((row) => String(row.lot.id)),
+  );
+  const bulkValidSelectedIds = bulkSelectedLotIds.filter((id) => bulkEligibleLotIds.has(id));
+
   useEffect(() => {
     setMasterTablePage(1);
+    setBulkSelectedLotIds([]); // changing Session/service never carries selections across locations
   }, [stockFilter, stockSessionFilter, productSearch, productStatusFilter, productServiceFilter]);
+
+  async function bulkAllocateSelectedLots() {
+    if (bulkAllocationBusy) return;
+    setError("");
+    const selected = masterTableRows
+      .filter((row) => row.lot && bulkValidSelectedIds.includes(String(row.lot.id)))
+      .map((row) => bulkAllocationPlan(row))
+      .filter((plan): plan is NonNullable<ReturnType<typeof bulkAllocationPlan>> => !!plan);
+    if (!selected.length) {
+      setError("Tidak ada Lot yang memenuhi syarat untuk alokasi baru. Lot yang sudah dialokasikan atau sudah dipakai tidak ditimpa.");
+      return;
+    }
+    const session = stockSessions.find((item) => Number(item.id || 0) === Number(stockSessionFilter || 0));
+    if (!session || normalizeCompany(session.company_name) !== normalizeCompany(stockFilter)) {
+      setError("Session/Perusahaan tidak cocok. Muat ulang halaman sebelum alokasi.");
+      return;
+    }
+    const preview = selected.map((p) => `${p.vaccineName} / ${p.lotNumber}: ${p.quantity} dosis`).join("\n");
+    if (!window.confirm(
+      `ALOKASI STOK MASSAL (LOT BARU SAJA)\n` +
+      `Session: ${sessionLabel(session)}\nLayanan: ${productServiceFilter}\n` +
+      `Jumlah Lot: ${selected.length}\n\n${preview}\n\n` +
+      `Alokasi yang sudah ada tetap. Tidak membuat stok atau movement. Lanjut?`,
+    )) return;
+
+    setBulkAllocationBusy(true);
+    let successCount = 0;
+    try {
+      // Fresh, read-only preflight blocks stale snapshots if the event moved stock
+      // between table rendering and user confirmation. Server performs own guard.
+      const freshResponse = await fetch("/api/vaccination/master", { cache: "no-store" });
+      const fresh = await freshResponse.json().catch(() => ({}));
+      if (!freshResponse.ok || !fresh.ok || fresh.serviceStockReady === false || fresh.sessionProductAssignmentReady === false) {
+        throw new Error(fresh.message || "Data Master terbaru tidak bisa diverifikasi. Alokasi dihentikan.");
+      }
+      const freshLots: any[] = Array.isArray(fresh.lots) ? fresh.lots : [];
+      const freshAllocations: any[] = Array.isArray(fresh.serviceStockAllocations) ? fresh.serviceStockAllocations : [];
+      const freshAssignments: any[] = Array.isArray(fresh.sessionProductAssignments) ? fresh.sessionProductAssignments : [];
+      for (const plan of selected) {
+        const freshLot = freshLots.find((item) => String(item.id) === plan.lotId);
+        if (
+          !freshLot || freshLot.active === false ||
+          lotScope(freshLot) !== "SESSION" ||
+          Number(freshLot.stock_session_id || 0) !== plan.sessionId ||
+          normalizeCompany(freshLot.stock_company_name) !== normalizeCompany(plan.companyName) ||
+          Number(freshLot.vaccine_id || freshLot.vaccine?.id || 0) !== Number(plan.vaccineId) ||
+          Number(freshLot.stock_initial || 0) !== plan.stockInitial ||
+          Number(freshLot.stock_added || 0) !== plan.stockAdded ||
+          Number(freshLot.stock_used || 0) !== plan.stockUsed ||
+          Number(freshLot.stock_used || 0) !== 0
+        ) throw new Error(`Stok/Lot ${plan.lotNumber} berubah saat event berlangsung. Refresh sebelum mencoba lagi.`);
+        if (!freshAssignments.some((item) =>
+          item.active !== false && Number(item.session_id || 0) === plan.sessionId &&
+          Number(item.vaccine_id || 0) === Number(plan.vaccineId) &&
+          String(item.service_mode || "HEALTHDAY").toUpperCase() === plan.mode,
+        )) throw new Error(`Layanan Session untuk ${plan.vaccineName} berubah. Alokasi dihentikan.`);
+        const getQty = (mode: "HEALTHDAY" | "BAZAR") => Math.max(0, Number(
+          freshAllocations.find((item) =>
+            item.active !== false && Number(item.lot_id || 0) === Number(plan.lotId) &&
+            Number(item.session_id || 0) === plan.sessionId &&
+            String(item.service_mode || "HEALTHDAY").toUpperCase() === mode,
+          )?.allocated_qty || 0,
+        ));
+        if (getQty("HEALTHDAY") !== plan.existingHD || getQty("BAZAR") !== plan.existingBazar) {
+          throw new Error(`Alokasi Lot ${plan.lotNumber} sudah berubah. Refresh untuk membaca data terbaru.`);
+        }
+      }
+
+      for (const plan of selected) {
+        // Exactly the existing one-lot server API. Preserve opposite-service qty.
+        await postMaster({
+          action: "save-session-service-stock",
+          lotId: Number(plan.lotId),
+          sessionId: plan.sessionId,
+          companyName: plan.companyName,
+          healthdayQty: plan.mode === "HEALTHDAY" ? plan.quantity : plan.existingHD,
+          bazarQty: plan.mode === "BAZAR" ? plan.quantity : plan.existingBazar,
+        });
+        successCount += 1;
+      }
+      setMessage(`${successCount} Lot berhasil dialokasikan ke ${productServiceFilter} pada ${sessionLabel(session)}. Stok fisik, histori, dan layanan lain tidak berubah.`);
+    } catch (err: any) {
+      setError(
+        `ALOKASI DIHENTIKAN: ${err?.message || "Gagal mengalokasikan stok."}` +
+        (successCount ? ` ${successCount} Lot sebelumnya telah berhasil disimpan; jangan ulang seluruh batch tanpa refresh.` : " Tidak ada alokasi yang disimpan oleh batch ini."),
+      );
+    } finally {
+      await loadData();
+      setBulkSelectedLotIds([]);
+      setBulkAllocationBusy(false);
+    }
+  }
   useEffect(() => {
     if (!masterEditorOpen) return;
     const originalOverflow = document.body.style.overflow;
@@ -2310,15 +2476,44 @@ export default function VaccinationMasterPage() {
               <option value="ALL">Semua layanan</option><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option>
             </select>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-blue-50/50 px-4 py-3 text-xs">
+            <div>
+              <div className="font-bold text-slate-800">Alokasi stok banyak Lot · {bulkValidSelectedIds.length} dipilih</div>
+              <p className="mt-1 text-slate-600">
+                Pilih tepat 1 perusahaan, 1 Session, dan layanan Healthday/Bazar. Hanya Lot baru, aktif, belum dipakai, dan belum dialokasikan yang dapat dipilih.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={bulkAllocationBusy || !bulkValidSelectedIds.length || stockSessionFilter === "ALL" || productServiceFilter === "ALL"}
+              onClick={bulkAllocateSelectedLots}
+              className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {bulkAllocationBusy ? "Mengalokasikan..." : `Alokasikan Stok (${bulkValidSelectedIds.length})`}
+            </button>
+          </div>
           <table className="w-full table-fixed border-collapse text-left text-xs md:text-sm">
             <thead className="bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="w-[23%] px-3 py-3">Produk / Brand</th>
-                <th className="w-[25%] px-3 py-3">Lot / Tujuan Stok</th>
-                <th className="w-[15%] px-2 py-3">Layanan / Harga</th>
-                <th className="w-[19%] px-2 py-3">Ringkasan Stok</th>
+                <th className="w-[5%] px-2 py-3" title="Pilih semua Lot yang memenuhi syarat di halaman ini">
+                  <input
+                    type="checkbox"
+                    aria-label="Pilih seluruh Lot yang bisa dialokasikan pada halaman ini"
+                    disabled={bulkAllocationBusy || !bulkVisibleEligibleIds.length}
+                    checked={bulkVisibleEligibleIds.length > 0 && bulkVisibleEligibleIds.every((id) => bulkValidSelectedIds.includes(id))}
+                    onChange={(e) => {
+                      setBulkSelectedLotIds((prev) => e.target.checked
+                        ? Array.from(new Set([...prev, ...bulkVisibleEligibleIds]))
+                        : prev.filter((id) => !bulkVisibleEligibleIds.includes(id)));
+                    }}
+                  />
+                </th>
+                <th className="w-[20%] px-3 py-3">Produk / Brand</th>
+                <th className="w-[23%] px-3 py-3">Lot / Tujuan Stok</th>
+                <th className="w-[13%] px-2 py-3">Layanan / Harga</th>
+                <th className="w-[18%] px-2 py-3">Ringkasan Stok</th>
                 <th className="w-[7%] px-2 py-3">Status</th>
-                <th className="w-[11%] px-2 py-3">Aksi</th>
+                <th className="w-[14%] px-2 py-3">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -2331,8 +2526,25 @@ export default function VaccinationMasterPage() {
                 const packageOffer = productSalesOffer(vaccine.id, "PACKAGE");
                 const modes = vaccineServiceModes(vaccine.id);
                 const session = lot ? sessionMap.get(Number(lot.stock_session_id || 0)) : null;
+                const eligibleForBulk = !!bulkAllocationPlan({ vaccine, lot });
                 return (
                   <tr key={`${vaccine.id}-${lot?.id || "no-lot"}-${index}`} className="align-top even:bg-slate-50/40">
+                    <td className="px-2 py-3 text-center align-middle">
+                      <input
+                        type="checkbox"
+                        aria-label={`Pilih Lot ${lot?.lot_number || "tanpa Lot"} untuk ${vaccine.name}`}
+                        disabled={bulkAllocationBusy || !eligibleForBulk}
+                        title={eligibleForBulk ? "Siap dialokasikan" : "Lot tidak memenuhi syarat alokasi baru atau sudah memiliki alokasi"}
+                        checked={!!lot && eligibleForBulk && bulkValidSelectedIds.includes(String(lot.id))}
+                        onChange={(e) => {
+                          if (!lot) return;
+                          const id = String(lot.id);
+                          setBulkSelectedLotIds((prev) => e.target.checked
+                            ? Array.from(new Set([...prev, id]))
+                            : prev.filter((item) => item !== id));
+                        }}
+                      />
+                    </td>
                     <td className="break-words px-3 py-3">
                       <div className="font-bold text-slate-900">{vaccine.name}</div>
                       <div className="mt-0.5 text-xs text-slate-500">{vaccine.brand || "Tanpa brand"}</div>
@@ -2379,7 +2591,7 @@ export default function VaccinationMasterPage() {
                   </tr>
                 );
               })}
-              {!masterVisibleRows.length ? <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-500">Tidak ada produk pada filter ini.</td></tr> : null}
+              {!masterVisibleRows.length ? <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">Tidak ada produk pada filter ini.</td></tr> : null}
             </tbody>
           </table>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-slate-50 px-4 py-3 text-xs text-slate-600">
