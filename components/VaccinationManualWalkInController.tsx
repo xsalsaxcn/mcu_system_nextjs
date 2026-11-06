@@ -109,6 +109,17 @@ export default function VaccinationManualWalkInController({
     ? form.walkInSuggestedVaccineIds.map(String).filter(Boolean)
     : [];
   const suggestedVaccineKey = suggestedVaccineIds.join(",");
+  const isCurrentRegisteredParticipant =
+    Number(form?.existingRegistrationId || 0) > 0 &&
+    Number(form?.walkInRegisteredBenefitSessionId || 0) === sessionId &&
+    Array.isArray(form?.walkInRegisteredHealthdayBenefits) &&
+    form.walkInRegisteredHealthdayBenefits.length > 0;
+  const registeredHealthdayBenefits = isCurrentRegisteredParticipant &&
+    Array.isArray(form?.walkInRegisteredHealthdayBenefits)
+      ? form.walkInRegisteredHealthdayBenefits.filter((benefit: any) =>
+          Number(benefit?.vaccineId || 0) > 0,
+        )
+      : [];
 
   const [optionSets, setOptionSets] = useState<OptionState>(EMPTY_OPTIONS);
   const [selectedByMode, setSelectedByMode] =
@@ -234,6 +245,21 @@ export default function VaccinationManualWalkInController({
     serviceMode === "BAZAR" ? optionSets.BAZAR : optionSets.HEALTHDAY;
   const activeSelectedKeys = selectedByMode[serviceMode];
   const totalSelected = healthdaySelected.length + bazarSelected.length;
+  // Preserve original stock eligibility: display registered benefits even when
+  // their Healthday allocation is zero, but never turn them into choices.
+  const eligibleHealthdayVaccineIds = new Set(
+    optionSets.HEALTHDAY.map((item: any) =>
+      Number(item?.vaccine_id || item?.vaccine?.id || 0),
+    ),
+  );
+  const missingRegisteredHealthdayBenefits = registeredHealthdayBenefits.filter(
+    (benefit: any) => !eligibleHealthdayVaccineIds.has(Number(benefit.vaccineId)),
+  );
+  const registeredHealthdayStockBlocked =
+    serviceMode === "HEALTHDAY" &&
+    isCurrentRegisteredParticipant &&
+    registeredHealthdayBenefits.length > 0 &&
+    missingRegisteredHealthdayBenefits.length > 0;
 
   const bazarSubtotal = useMemo(
     () =>
@@ -696,7 +722,48 @@ export default function VaccinationManualWalkInController({
           Memuat produk...
         </div>
       ) : healthdayBazarEnabled && serviceMode === "HEALTHDAY" ? (
-        healthdaySummary.length ? (
+        registeredHealthdayBenefits.length ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">
+              Konfirmasi Benefit Healthday Terdaftar
+            </div>
+            <div className="mt-2 text-base font-black text-slate-900">
+              Atas nama {participantName || "peserta ini"} terdaftar benefit:
+            </div>
+            <div className="mt-3 grid gap-2">
+              {registeredHealthdayBenefits.map((benefit: any) => {
+                const eligibleOption = optionSets.HEALTHDAY.find((item: any) =>
+                  Number(item?.vaccine_id || item?.vaccine?.id || 0) === Number(benefit.vaccineId),
+                );
+                const eligible = Boolean(eligibleOption);
+                const availableLot = clean(eligibleOption?.lot?.lot_number);
+                const label = clean(benefit.name) || `Vaksin ID ${benefit.vaccineId}`;
+                return (
+                  <div key={String(benefit.vaccineId)} className={`rounded-xl border px-3 py-2 ${eligible ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+                    <div className="text-sm font-black text-slate-900">
+                      {label}{benefit.brand && !label.toLowerCase().includes(String(benefit.brand).toLowerCase()) ? ` · ${benefit.brand}` : ""}
+                      {availableLot ? <span className="ml-2 text-[11px] font-bold text-slate-600">Lot {availableLot}</span> : null}
+                    </div>
+                    <div className={`mt-1 text-xs font-bold ${eligible ? "text-emerald-800" : "text-amber-900"}`}>
+                      {eligible
+                        ? "Benefit terdaftar · produk Healthday tersedia pada Session ini"
+                        : "Benefit terdaftar · stok/alokasi Healthday belum tersedia pada Session ini"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {registeredHealthdayStockBlocked ? (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs font-bold text-amber-900">
+                Registrasi ulang dan rilis antrean Healthday ditahan karena salah satu benefit terdaftar belum memiliki alokasi tersedia. Periksa stok Session/Lot melalui alur Inventory yang sudah ada. Jangan mengganti vaksin peserta dengan produk lain.
+              </div>
+            ) : (
+              <div className="mt-3 text-xs font-semibold text-slate-600">
+                Benefit yang dapat dilanjutkan tetap mengikuti pilihan dan pemeriksaan stok Healthday yang sudah berlaku.
+              </div>
+            )}
+          </div>
+        ) : healthdaySummary.length ? (
           <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
             <div className="text-xs font-black uppercase tracking-wide text-blue-700">
               Konfirmasi Vaksin Healthday
@@ -873,7 +940,7 @@ export default function VaccinationManualWalkInController({
       <button
         type="button"
         onClick={submitManualRegistration}
-        disabled={submitting || !sessionId || !totalSelected}
+        disabled={submitting || !sessionId || !totalSelected || registeredHealthdayStockBlocked}
         className={`mt-4 rounded-xl px-4 py-2.5 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
           serviceMode === "BAZAR"
             ? "bg-violet-600 hover:bg-violet-700"

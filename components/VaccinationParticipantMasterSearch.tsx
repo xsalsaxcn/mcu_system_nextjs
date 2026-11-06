@@ -411,9 +411,35 @@ export default function VaccinationParticipantMasterSearch({
       walkInSuggestedVaccineIds: Array.isArray(extra?.suggestedVaccineIds)
         ? extra.suggestedVaccineIds.map(String).filter(Boolean)
         : [],
+      // Registered benefits are display-only; available products still come
+      // exclusively from the existing stock-filtered options endpoint.
+      walkInRegisteredHealthdayBenefits: Array.isArray(extra?.registeredHealthdayBenefits)
+        ? extra.registeredHealthdayBenefits
+        : [],
+      walkInRegisteredBenefitSessionId: Number(extra?.registeredBenefitSessionId || 0),
       walkInContextLabel: clean(extra?.contextLabel),
       ...(extra?.serviceMode ? { serviceMode: extra.serviceMode } : {}),
     }));
+  }
+
+  // V596: Read-only snapshot of registered Healthday benefits. This is NOT a
+  // stock-eligible option list and must never be submitted as a vaccine choice.
+  function registeredHealthdayBenefits(items: any[]) {
+    const seen = new Set<number>();
+    return (Array.isArray(items) ? items : []).flatMap((item: any) => {
+      const service = clean(item?.serviceMode || item?.service_mode || "HEALTHDAY").toUpperCase();
+      if (service === "BAZAR" || item?.active === false) return [];
+      const vaccine = Array.isArray(item?.vaccine) ? item.vaccine[0] : item?.vaccine;
+      const vaccineId = Number(item?.vaccineId || item?.vaccine_id || vaccine?.id || 0);
+      if (!vaccineId || seen.has(vaccineId)) return [];
+      seen.add(vaccineId);
+      return [{
+        vaccineId,
+        name: clean(item?.name || vaccine?.name || item?.vaccine_name) || `Vaksin ID ${vaccineId}`,
+        brand: clean(item?.brand || vaccine?.brand),
+        status: clean(item?.status).toUpperCase(),
+      }];
+    });
   }
 
   function chooseCurrentRegistration(row: any) {
@@ -431,6 +457,8 @@ export default function VaccinationParticipantMasterSearch({
       // V513: carry the participant's registered Healthday vaccine into the
       // Healthday confirmation pop-up. Bazar mode ignores/clears this selection.
       suggestedVaccineIds: Array.from(new Set(currentHealthdayVaccineIds)),
+      registeredHealthdayBenefits: registeredHealthdayBenefits(row?.items),
+      registeredBenefitSessionId: Number(row?.session_id || session?.id || 0),
       contextLabel: `Terdaftar di ${session?.session_name || session?.location || "session ini"}`,
     });
     setCurrentQuery(clean(row?.participant_name));
@@ -617,6 +645,8 @@ export default function VaccinationParticipantMasterSearch({
                 .filter(Boolean),
             ),
           ),
+          registeredHealthdayBenefits: registeredHealthdayBenefits(current?.benefits),
+          registeredBenefitSessionId: Number(current?.sessionId || 0),
           contextLabel: `Sudah terdaftar di ${current?.session?.name || current?.session?.location || "session ini"}`,
         },
       );
@@ -732,6 +762,8 @@ export default function VaccinationParticipantMasterSearch({
       masterSearchSource: "NEW_MANUAL",
       moveFromRegistrationId: null,
       walkInSuggestedVaccineIds: [],
+      walkInRegisteredHealthdayBenefits: [],
+      walkInRegisteredBenefitSessionId: 0,
       walkInContextLabel: "Peserta baru / Registrasi manual",
     }));
 
