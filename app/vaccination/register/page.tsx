@@ -503,7 +503,13 @@ export default function VaccinationRegisterPage() {
 
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return queueReadyRegistrations.filter((registration: any) => {
+    // V601: searching must find imported/unreleased people, without changing
+    // the normal queue list, queue release eligibility, or queue counts.
+    const searchRows = keyword ? sortedRegistrations.filter((registration: any) => {
+      if (!healthdayBazarEnabled) return true;
+      return serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A");
+    }) : queueReadyRegistrations;
+    return searchRows.filter((registration: any) => {
       const serviceItems = (Array.isArray(registration.items) ? registration.items : []).filter((item: any) => {
         if (!healthdayBazarEnabled) return true;
         return String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView;
@@ -521,7 +527,7 @@ export default function VaccinationRegisterPage() {
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [queueReadyRegistrations, search, productFilter, healthdayBazarEnabled, activeQueueView]);
+  }, [queueReadyRegistrations, sortedRegistrations, search, productFilter, healthdayBazarEnabled, activeQueueView]);
 
   const pendingSelfBookings = useMemo(
     () => selfBookings.filter((booking: any) => String(booking?.booking_status || "").toUpperCase() === "PENDING"),
@@ -740,6 +746,8 @@ export default function VaccinationRegisterPage() {
       vaccineName: item?.vaccineName || "Produk Bazar",
       lotNumber: item?.lotNumber || "-",
       saleMode: String(item?.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+      quantity: Number(item?.quantity || 1),
+      startDose: Number(item?.startDose || 1),
     }));
     setEditingSelfBooking({
       id: Number(booking?.id || 0),
@@ -774,6 +782,8 @@ export default function VaccinationRegisterPage() {
         vaccineName: item.vaccineName || "Produk Bazar",
         lotNumber: item.lotNumber || "-",
         saleMode: String(first?.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+        quantity: 1,
+        startDose: 1,
       }],
     });
   }
@@ -2273,7 +2283,7 @@ export default function VaccinationRegisterPage() {
                         <td className="p-3"><div className="font-black text-slate-900">{booking.participant_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{booking.company_name || "-"}</div></td>
                         <td className="p-3 font-bold">{booking.employee_id || "-"}</td>
                         <td className="p-3">
-                          <div className="space-y-1">{items.map((item: any, index: number) => <div key={`${booking.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccineName || "Produk"} · Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "Paket" : "Non Paket"}</div>)}</div>
+                          <div className="space-y-1">{items.map((item: any, index: number) => <div key={`${booking.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccineName || "Produk Bazar"} · Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "Paket" : `Non Paket · ${Number(item.quantity || 1)} dosis`} · mulai dosis {Number(item.startDose || 1)}</div>)}</div>
                         </td>
                         <td className="p-3 font-black text-violet-700">{money(booking.estimated_total)}</td>
                         <td className="p-3"><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Menunggu Proses</span></td>
@@ -2564,7 +2574,9 @@ export default function VaccinationRegisterPage() {
                 {!visibleRegistrations.length ? (
                   <tr>
                     <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-5 text-center text-slate-500">
-                      {internalQueueEnabled && healthdayBazarEnabled
+                      {search.trim()
+                        ? "Peserta tidak ditemukan pada layanan/produk filter saat ini. Hapus filter produk atau periksa Session."
+                        : internalQueueEnabled && healthdayBazarEnabled
                         ? "Belum ada peserta yang sudah memiliki nomor antrean."
                         : internalQueueEnabled
                           ? "Belum ada peserta untuk session ini."
@@ -2597,9 +2609,13 @@ export default function VaccinationRegisterPage() {
                   const catalogItem = selfBookingCatalogItem(item.vaccineId, item.lotId);
                   return <div key={`edit-booking-${item.vaccineId}-${item.lotId}-${index}`} className="grid gap-2 rounded-2xl border p-3 md:grid-cols-[1fr_170px_auto] md:items-center">
                     <div><div className="font-black">{item.vaccineName}</div><div className="text-xs font-semibold text-slate-500">Lot {item.lotNumber || "-"}</div></div>
-                    <select value={item.saleMode} onChange={(event) => { const next = [...editingSelfBooking.selectedItems]; next[index] = { ...next[index], saleMode: event.target.value === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE" }; setEditingSelfBooking({ ...editingSelfBooking, selectedItems: next }); }} className="rounded-xl border px-3 py-2 text-sm font-bold">
+                    <select value={item.saleMode} onChange={(event) => { const next = [...editingSelfBooking.selectedItems]; next[index] = { ...next[index], saleMode: event.target.value === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE", quantity: event.target.value === "PACKAGE" ? 1 : (next[index].quantity || 1) }; setEditingSelfBooking({ ...editingSelfBooking, selectedItems: next }); }} className="rounded-xl border px-3 py-2 text-sm font-bold">
                       {(catalogItem?.salesOptions || []).map((option: any) => <option key={`${item.vaccineId}-${item.lotId}-${option.saleMode}`} value={option.saleMode}>{String(option.saleMode).toUpperCase() === "PACKAGE" ? `Paket · ${money(option.price)}` : `Non Paket · ${money(option.price)}`}</option>)}
                     </select>
+                    <div className="flex flex-wrap gap-2 text-xs font-bold">
+                      {item.saleMode !== "PACKAGE" ? <label>Jumlah dosis <select className="ml-1 rounded-lg border p-2" value={item.quantity || 1} onChange={e => { const next=[...editingSelfBooking.selectedItems]; next[index]={...next[index],quantity:Number(e.target.value)};setEditingSelfBooking({...editingSelfBooking,selectedItems:next}); }}>{[1,2,3].map(n=><option key={n} value={n}>{n}</option>)}</select></label> : null}
+                      <label>Dosis ke- <select className="ml-1 rounded-lg border p-2" value={item.startDose || 1} onChange={e => { const next=[...editingSelfBooking.selectedItems]; next[index]={...next[index],startDose:Number(e.target.value)};setEditingSelfBooking({...editingSelfBooking,selectedItems:next}); }}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
+                    </div>
                     <button type="button" onClick={() => setEditingSelfBooking({ ...editingSelfBooking, selectedItems: editingSelfBooking.selectedItems.filter((_: any, rowIndex: number) => rowIndex !== index) })} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700">Hapus</button>
                   </div>;
                 })}
@@ -2646,9 +2662,9 @@ export default function VaccinationRegisterPage() {
                   <div key={`process-${processingBooking.id}-${index}`} className="flex flex-col gap-2 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="font-black">{item.vaccineName || "Produk Bazar"}</div>
-                      <div className="mt-1 text-xs font-semibold text-slate-500">Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? `Paket ${Number(item.packageDoseCount || 1)} dosis` : "Non Paket"}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? `Paket ${Number(item.packageDoseCount || 1)} dosis` : `Non Paket · ${Number(item.quantity || 1)} dosis`} · mulai dosis ke-{Number(item.startDose || 1)}</div>
                     </div>
-                    <div className="font-black text-violet-700">{money(item.unitPrice)}</div>
+                    <div className="font-black text-violet-700">{money(Number(item.unitPrice || 0) * (Number(item.quantity || 1)))}</div>
                   </div>
                 ))}
               </div>

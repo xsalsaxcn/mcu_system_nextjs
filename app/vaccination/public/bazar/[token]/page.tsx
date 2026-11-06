@@ -91,13 +91,16 @@ export default function BazarPublicRegistrationPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [person, setPerson] = useState<Person | null>(null);
-  const [step, setStep] = useState<"LOOKUP" | "FORM" | "PRODUCTS" | "SUCCESS">("LOOKUP");
+  const [linkedFamilyChoices, setLinkedFamilyChoices] = useState<Person[]>([]);
+  const [step, setStep] = useState<"LOOKUP" | "FORM" | "CHOOSE_PERSON" | "PRODUCTS" | "SUCCESS">("LOOKUP");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [productFilter, setProductFilter] = useState("ALL");
   const [selected, setSelected] = useState<Record<string, "PACKAGE" | "NON_PACKAGE">>({});
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [startingDoses, setStartingDoses] = useState<Record<string, number>>({});
   const [result, setResult] = useState<any>(null);
   const [form, setForm] = useState({ name: "", nik: "", employeeId: "", email: "", phone: "", gender: "", birthDate: "" });
 
@@ -137,10 +140,11 @@ export default function BazarPublicRegistrationPage() {
     const lotId = Number(lotIdText);
     const product = products.find((item) => item.vaccineId === vaccineId && item.lotId === lotId);
     const offer = product?.salesOptions.find((item) => item.saleMode === saleMode) || null;
-    return { vaccineId, lotId, saleMode, product, offer };
-  }).filter((item) => item.product && item.offer), [products, selected]);
+    const quantity = saleMode === "PACKAGE" ? 1 : Math.max(1, Math.min(3, quantities[key] || 1));
+    return { vaccineId, lotId, saleMode, product, offer, quantity, startDose: startingDoses[key] || 1 };
+  }).filter((item) => item.product && item.offer), [products, selected, quantities, startingDoses]);
 
-  const total = selectedItems.reduce((sum, item) => sum + Number(item.offer?.price || 0), 0);
+  const total = selectedItems.reduce((sum, item) => sum + Number(item.offer?.price || 0) * item.quantity, 0);
 
   async function post(body: any) {
     const res = await fetch("/api/vaccination/public-bazar", {
@@ -162,8 +166,10 @@ export default function BazarPublicRegistrationPage() {
       const json = await post({ action: "lookup", employeeId: id });
       if (json.found && json.person) {
         setPerson(json.person);
-        setStep("PRODUCTS");
-        setMessage("Data ditemukan. Silakan pilih produk Bazar.");
+        const family = Array.isArray(json.familyMembers) ? json.familyMembers : [];
+        setLinkedFamilyChoices(family.length ? [json.person, ...family] : []);
+        setStep(family.length ? "CHOOSE_PERSON" : "PRODUCTS");
+        setMessage(family.length ? "Pilih nama penerima vaksin. Employee ID keluarga boleh sama, tetapi pendaftarannya terpisah." : "Data ditemukan. Silakan pilih produk Bazar.");
       } else {
         setForm((prev) => ({ ...prev, employeeId: id }));
         setStep("FORM");
@@ -209,7 +215,7 @@ export default function BazarPublicRegistrationPage() {
         action: "register",
         employeeId: person.employeeId,
         person,
-        items: selectedItems.map((item) => ({ vaccineId: item.vaccineId, lotId: item.lotId, saleMode: item.saleMode })),
+        items: selectedItems.map((item) => ({ vaccineId: item.vaccineId, lotId: item.lotId, saleMode: item.saleMode, quantity: item.quantity, startDose: item.startDose })),
       });
       setResult(json.booking || {});
       setStep("SUCCESS");
@@ -269,6 +275,15 @@ export default function BazarPublicRegistrationPage() {
             </div>
           ) : null}
 
+          {step === "CHOOSE_PERSON" ? (
+            <div className="mt-7 space-y-3">
+              <h2 className="text-lg font-black text-slate-900">Siapa yang akan menerima vaksin?</h2>
+              <p className="text-xs font-semibold text-slate-500">Pilih sesuai nama, bukan hanya Employee ID. Setiap anggota keluarga mempunyai pesanan dan riwayat masing-masing.</p>
+              {linkedFamilyChoices.map((member, index) => <button key={member.historyPersonId || `family-${index}`} type="button" onClick={() => { setPerson(member); setSelected({}); setQuantities({}); setStartingDoses({}); setStep("PRODUCTS"); }} className="w-full rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-left hover:border-emerald-400"><div className="font-black text-slate-900">{member.name}</div><div className="mt-1 text-xs font-semibold text-emerald-800">{index === 0 ? "Parent / Karyawan" : "Child / Family"} · {member.employeeId || employeeId}</div></button>)}
+              <button type="button" onClick={() => { setStep("LOOKUP"); setLinkedFamilyChoices([]); setPerson(null); }} className="w-full rounded-xl border p-3 text-xs font-bold">Kembali ke pencarian</button>
+            </div>
+          ) : null}
+
           {step === "FORM" ? (
             <div className="mt-7 space-y-4">
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">Data belum ditemukan. Lengkapi data peserta sesuai standar pendaftaran.</div>
@@ -319,6 +334,13 @@ export default function BazarPublicRegistrationPage() {
                               {product.salesOptions.map((item) => <option key={`${key}-${item.saleMode}`} value={item.saleMode}>{item.saleMode === "PACKAGE" ? `Paket · ${item.packageDoseCount} dosis` : "Non Paket"}</option>)}
                             </select>
                           ) : null}
+                          {checked ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-blue-100 bg-white p-3 text-xs font-semibold">
+                              {mode === "NON_PACKAGE" ? <label>Jumlah dosis dibayar <select aria-label="Jumlah dosis berbayar" className="ml-2 rounded-lg border px-2 py-1" value={quantities[key] || 1} onChange={(e) => setQuantities(prev => ({...prev,[key]:Number(e.target.value)}))}>{[1,2,3].filter(n => product.stockRemaining == null || n <= Number(product.stockRemaining)).map(n => <option key={n} value={n}>{n} dosis</option>)}</select></label> : null}
+                              <label>Mulai dosis ke- <select aria-label="Nomor dosis lanjutan" className="ml-2 rounded-lg border px-2 py-1" value={startingDoses[key] || 1} onChange={(e) => setStartingDoses(prev => ({...prev,[key]:Number(e.target.value)}))}>{[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+                              <div className="w-full text-[11px] text-amber-700">Dosis lanjutan bisa dibeli; penyuntikan berikutnya harus mengikuti jadwal klinis, bukan otomatis dilakukan sekaligus.</div>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="shrink-0 text-right">
                           <div className={`rounded-full px-2 py-1 text-[10px] font-black ${mode === "PACKAGE" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{mode === "PACKAGE" ? "Paket" : "Non Paket"}</div>
@@ -355,7 +377,7 @@ export default function BazarPublicRegistrationPage() {
                 <div className="mt-2 text-3xl font-black text-blue-700">SB-{String(result?.id || "-").padStart(4, "0")}</div>
                 <div className="mt-2 text-xs font-semibold text-slate-500">Estimasi {rupiah(result?.estimatedTotal || total)}</div>
               </div>
-              <button type="button" onClick={() => { setStep("LOOKUP"); setEmployeeId(""); setPerson(null); setSelected({}); setResult(null); setMessage(""); setError(""); }} className="mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-black text-slate-700">Daftarkan Peserta Lain</button>
+              <button type="button" onClick={() => { setStep("LOOKUP"); setEmployeeId(""); setPerson(null); setLinkedFamilyChoices([]); setSelected({}); setQuantities({}); setStartingDoses({}); setResult(null); setMessage(""); setError(""); }} className="mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-black text-slate-700">Daftarkan Peserta Lain</button>
             </div>
           ) : null}
         </div>

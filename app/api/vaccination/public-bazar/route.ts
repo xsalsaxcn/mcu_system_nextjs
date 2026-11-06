@@ -44,6 +44,46 @@ function normalizeSaleMode(value: any): "PACKAGE" | "NON_PACKAGE" {
   return clean(value).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE";
 }
 
+
+// V601: Employee ID is a family/company lookup key, not a unique person identity.
+// Fail closed on conflicting names/NIK even if one legacy person id happens to match.
+function sameBookingPerson(a: any, b: any): boolean {
+  const norm = (value: any) => clean(value).toUpperCase().replace(/\s+/g, " ");
+  const aid = Number(a?.history_person_id || a?.historyPersonId || 0);
+  const bid = Number(b?.history_person_id || b?.historyPersonId || 0);
+  const apid = Number(a?.participant_id || a?.participantId || 0);
+  const bpid = Number(b?.participant_id || b?.participantId || 0);
+  const anik = norm(a?.nik), bnik = norm(b?.nik);
+  const aname = norm(a?.participant_name || a?.participantName || a?.name);
+  const bname = norm(b?.participant_name || b?.participantName || b?.name);
+  const aemp = norm(a?.employee_id || a?.employeeId);
+  const bemp = norm(b?.employee_id || b?.employeeId);
+  if (aid && bid && aid !== bid) return false;
+  if (apid && bpid && apid !== bpid) return false;
+  if (anik && bnik && anik !== bnik) return false;
+  if (aname && bname && aname !== bname) return false;
+  if (aid && bid && aid === bid) return true;
+  if (apid && bpid && apid === bpid) return true;
+  if (anik && bnik && anik === bnik) return true;
+  return Boolean(aname && bname && aname === bname && aemp && bemp && aemp === bemp);
+}
+
+function safeQuantity(value: any): number {
+  const number = Number(value == null ? 1 : value);
+  if (!Number.isInteger(number) || number < 1 || number > 3) {
+    throw new Error("Jumlah dosis berbayar harus 1 sampai 3 per produk. Hubungi tim untuk kebutuhan khusus.");
+  }
+  return number;
+}
+
+function safeStartDose(value: any): number {
+  const number = Number(value == null ? 1 : value);
+  if (!Number.isInteger(number) || number < 1 || number > 10) {
+    throw new Error("Nomor dosis pertama yang dibeli tidak valid.");
+  }
+  return number;
+}
+
 function money(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
@@ -454,6 +494,32 @@ async function lookupByEmployeeId(supabase: any, session: any, employeeIdInput: 
   return mergePerson(operational, history);
 }
 
+
+async function linkedBazarFamilyMembers(supabase: any, session: any, parent: any) {
+  const parentPersonId = Number(parent?.historyPersonId || 0);
+  if (!parentPersonId) return [];
+  const company = await resolveHistoryCompany(supabase, clean(session.company_name));
+  if (!company?.id) return [];
+  const links = await supabase.from("vaccination_person_relationships")
+    .select("dependent_person_id")
+    .eq("company_id", Number(company.id))
+    .eq("parent_person_id", parentPersonId)
+    .eq("active", true).limit(100);
+  // Relationship table is optional for older Sessions; do not break parent booking.
+  if (links.error) return [];
+  const ids = Array.from(new Set<number>((links.data || [])
+    .map((row: any) => Number(row.dependent_person_id || 0)).filter((id: number) => id > 0)));
+  if (!ids.length) return [];
+  const people = await supabase.from("vaccination_persons")
+    .select("id,participant_name,employee_id,nik,email,phone,birth_date,gender,active,participant_type,company_id")
+    .eq("company_id", Number(company.id)).eq("active", true)
+    .in("id", ids).limit(100);
+  if (people.error) return [];
+  return (people.data || []).filter((row: any) => row.participant_type === "DEPENDENT")
+    .map((row: any) => ({ ...historyPerson(row, clean(session.company_name)),
+      employeeId: clean(parent.employeeId), participantId: null }));
+}
+
 async function saveStandardPerson(supabase: any, session: any, body: any) {
   const company = await resolveHistoryCompany(supabase, clean(session.company_name));
   if (!company?.id) throw new Error("Perusahaan untuk session ini belum tersedia.");
@@ -534,17 +600,27 @@ async function createSelfBooking(supabase: any, session: any, person: any, selec
 
   const snapshots: any[] = [];
   let estimatedTotal = 0;
+  const seenProducts = new Set<string>();
   for (const input of selectedItems) {
     const vaccineId = Number(input.vaccineId || input.vaccine_id || 0);
     const lotId = Number(input.lotId || input.lot_id || 0);
-    const option = catalogMap.get(`${vaccineId}:${lotId}`);
+    const key = `${vaccineId}:${lotId}`;
+    if (seenProducts.has(key)) throw new Error("Produk sama dipilih lebih dari sekali. Gunakan Jumlah Dosis.");
+    seenProducts.add(key);
+    const option = catalogMap.get(key);
     if (!option) throw new Error("Produk yang dipilih sudah tidak tersedia pada Session Bazar ini. Muat ulang lalu pilih kembali.");
     const saleMode = normalizeSaleMode(input.saleMode || input.sale_mode);
+    const quantity = safeQuantity(input.quantity);
+    const startDose = safeStartDose(input.startDose || input.start_dose);
+    if (saleMode === "PACKAGE" && quantity !== 1) throw new Error("Paket sudah mencakup beberapa dosis. Jumlah Paket hanya boleh satu.");
+    if (option.stockRemaining != null && Number(option.stockRemaining) < quantity) {
+      throw new Error("Stok Bazar produk terpilih tidak cukup untuk jumlah dosis yang dibayar.");
+    }
     const offer = option.salesOptions.find((item) => item.saleMode === saleMode);
     if (!offer || offer.price <= 0) {
       throw new Error(saleMode === "PACKAGE" ? "Harga Paket belum tersedia." : "Harga Non Paket belum tersedia.");
     }
-    estimatedTotal = money(estimatedTotal + offer.price);
+    estimatedTotal = money(estimatedTotal + money(offer.price) * quantity);
     snapshots.push({
       vaccineId: option.vaccineId,
       lotId: option.lotId,
@@ -554,6 +630,8 @@ async function createSelfBooking(supabase: any, session: any, person: any, selec
       saleMode,
       salesOptionId: offer.id || null,
       packageDoseCount: Math.max(1, Number(offer.packageDoseCount || 1)),
+      quantity,
+      startDose,
       unitPrice: money(offer.price),
     });
   }
@@ -583,26 +661,32 @@ async function createSelfBooking(supabase: any, session: any, person: any, selec
     updated_at: now,
   };
 
+  // V601: never overwrite a relative's pending order merely because Employee ID matches.
   const pending = await supabase
     .from("vaccination_bazar_self_bookings")
-    .select("id,booking_status")
+    .select("id,booking_status,participant_id,history_person_id,participant_name,employee_id,nik")
     .eq("session_id", Number(session.id))
     .eq("employee_id", employeeId)
     .eq("booking_status", "PENDING")
     .order("id", { ascending: false })
-    .limit(1);
+    .limit(100);
   if (pending.error) {
     if (String(pending.error.message || "").includes("vaccination_bazar_self_bookings")) {
       throw new Error("Pendaftaran mandiri belum siap digunakan. Hubungi tim registrasi.");
     }
     throw new Error(pending.error.message);
   }
-
-  if ((pending.data || []).length) {
+  if ((pending.data || []).length === 100) {
+    throw new Error("Terlalu banyak pesanan pending untuk Employee ID ini; hubungi tim registrasi agar tidak tertukar.");
+  }
+  const matching = (pending.data || []).filter((row: any) => sameBookingPerson(row, payload));
+  if (matching.length > 1) throw new Error("Ditemukan beberapa pesanan pending milik peserta yang sama. Tim registrasi perlu memeriksa sebelum melanjutkan.");
+  if (matching.length === 1) {
     const update = await supabase
       .from("vaccination_bazar_self_bookings")
       .update(payload)
-      .eq("id", Number(pending.data[0].id))
+      .eq("id", Number(matching[0].id))
+      .eq("booking_status", "PENDING")
       .select("id,booking_status,estimated_total,submitted_at")
       .single();
     if (update.error) throw new Error(update.error.message);
@@ -659,7 +743,13 @@ export async function POST(req: NextRequest) {
       const employeeId = clean(body.employeeId || body.employee_id);
       if (!employeeId) return json({ ok: false, message: "NIP / Employee ID wajib diisi." }, 400);
       const person = await lookupByEmployeeId(supabase, session, employeeId);
-      return json({ ok: true, found: Boolean(person), person: person || null, employeeId, companyName: clean(session.company_name) });
+      const familyMembers = person ? await linkedBazarFamilyMembers(supabase, session, person) : [];
+      // Never expose dependent NIK, phone, birth date or email on a public lookup.
+      const safeFamilyChoices = familyMembers.map((member: any) => ({
+        historyPersonId: Number(member.historyPersonId),
+        name: clean(member.name), employeeId, companyName: clean(session.company_name),
+      }));
+      return json({ ok: true, found: Boolean(person), person: person || null, familyMembers: safeFamilyChoices, employeeId, companyName: clean(session.company_name) });
     }
 
     if (action === "save-participant") {
@@ -672,7 +762,17 @@ export async function POST(req: NextRequest) {
       const employeeId = clean(person?.employeeId || body.employeeId || body.employee_id);
       if (!employeeId) return json({ ok: false, message: "NIP / Employee ID wajib diisi." }, 400);
       const canonical = await lookupByEmployeeId(supabase, session, employeeId);
-      person = mergePerson(canonical, person);
+      if (!canonical) return json({ ok: false, message: "Identitas peserta tidak ditemukan di database perusahaan. Ulangi pencarian." }, 409);
+      const requestedPersonId = Number(person?.historyPersonId || 0);
+      if (requestedPersonId && requestedPersonId !== Number(canonical.historyPersonId || 0)) {
+        const allowedChildren = await linkedBazarFamilyMembers(supabase, session, canonical);
+        person = allowedChildren.find((candidate: any) =>
+          Number(candidate.historyPersonId) === requestedPersonId) || null;
+        if (!person) return json({ ok: false, message: "Anggota keluarga belum terhubung ke Parent ini. Hubungkan melalui Registrasi Vaksinasi terlebih dahulu." }, 409);
+      } else {
+        // Ignore browser-controlled name/NIK; only the canonical database person can be booked.
+        person = canonical;
+      }
       if (!person?.name) return json({ ok: false, message: "Data peserta belum lengkap. Lengkapi data terlebih dahulu." }, 400);
       const booking = await createSelfBooking(
         supabase,

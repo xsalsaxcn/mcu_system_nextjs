@@ -21,6 +21,64 @@ function normalizeSaleMode(value: any): "PACKAGE" | "NON_PACKAGE" {
   return clean(value).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE";
 }
 
+
+// V601: Employee ID is a family/company lookup key, not a unique person identity.
+// Fail closed on conflicting names/NIK even if one legacy person id happens to match.
+function sameBookingPerson(a: any, b: any): boolean {
+  const norm = (value: any) => clean(value).toUpperCase().replace(/\s+/g, " ");
+  const aid = Number(a?.history_person_id || a?.historyPersonId || 0);
+  const bid = Number(b?.history_person_id || b?.historyPersonId || 0);
+  const apid = Number(a?.participant_id || a?.participantId || 0);
+  const bpid = Number(b?.participant_id || b?.participantId || 0);
+  const anik = norm(a?.nik), bnik = norm(b?.nik);
+  const aname = norm(a?.participant_name || a?.participantName || a?.name);
+  const bname = norm(b?.participant_name || b?.participantName || b?.name);
+  const aemp = norm(a?.employee_id || a?.employeeId);
+  const bemp = norm(b?.employee_id || b?.employeeId);
+  if (aid && bid && aid !== bid) return false;
+  if (apid && bpid && apid !== bpid) return false;
+  if (anik && bnik && anik !== bnik) return false;
+  if (aname && bname && aname !== bname) return false;
+  if (aid && bid && aid === bid) return true;
+  if (apid && bpid && apid === bpid) return true;
+  if (anik && bnik && anik === bnik) return true;
+  return Boolean(aname && bname && aname === bname && aemp && bemp && aemp === bemp);
+}
+
+function safeQuantity(value: any): number {
+  const number = Number(value == null ? 1 : value);
+  if (!Number.isInteger(number) || number < 1 || number > 3) {
+    throw new Error("Jumlah dosis berbayar harus 1 sampai 3 per produk. Hubungi tim untuk kebutuhan khusus.");
+  }
+  return number;
+}
+
+function safeStartDose(value: any): number {
+  const number = Number(value == null ? 1 : value);
+  if (!Number.isInteger(number) || number < 1 || number > 10) {
+    throw new Error("Nomor dosis pertama yang dibeli tidak valid.");
+  }
+  return number;
+}
+
+
+function paidDoseCollisions(priorItems: any[], newRows: any[]): string[] {
+  const collisions: string[] = [];
+  for (const item of newRows) {
+    const start = item.startDose;
+    const end = start + (item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity) - 1;
+    for (const prior of priorItems) {
+      if (Number(prior.vaccine_id) !== item.vaccineId) continue;
+      const priorStart = Math.max(1, Number(prior.dose_number || 1));
+      const priorEnd = priorStart + Math.max(1, Number(prior.package_dose_count || 1)) - 1;
+      if (start <= priorEnd && end >= priorStart) {
+        collisions.push(`${item.vaccineName} (dosis ${start}${end !== start ? `-${end}` : ""}; registrasi #${prior?.registration?.id || "?"} sudah mencakup dosis ${priorStart}-${priorEnd})`);
+      }
+    }
+  }
+  return Array.from(new Set(collisions));
+}
+
 function money(value: any) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
@@ -302,18 +360,28 @@ async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: 
 
   const rows: any[] = [];
   let total = 0;
+  const seen = new Set<string>();
   for (const selected of selectedItems) {
     const vaccineId = Number(selected?.vaccineId || selected?.vaccine_id || 0);
     const lotId = Number(selected?.lotId || selected?.lot_id || 0);
     const saleMode = normalizeSaleMode(selected?.saleMode || selected?.sale_mode);
-    const option = catalogMap.get(`${vaccineId}:${lotId}`);
+    const quantity = safeQuantity(selected?.quantity);
+    const startDose = safeStartDose(selected?.startDose || selected?.start_dose);
+    const key = `${vaccineId}:${lotId}`;
+    if (seen.has(key)) throw new Error("Produk sama dipilih lebih dari sekali. Gunakan Jumlah Dosis.");
+    seen.add(key);
+    if (saleMode === "PACKAGE" && quantity !== 1) throw new Error("Paket sudah mencakup beberapa dosis; tidak boleh dikalikan lagi.");
+    const option = catalogMap.get(key);
     if (!option) throw new Error("Ada produk Self Booking yang sudah tidak aktif atau stoknya tidak tersedia pada Session Bazar ini.");
+    if (option.stockRemaining != null && Number(option.stockRemaining) < quantity) {
+      throw new Error("Stok Bazar tidak cukup untuk jumlah dosis berbayar yang dipilih.");
+    }
     const offer = (option.salesOptions || []).find((row: any) => normalizeSaleMode(row.saleMode) === saleMode);
     if (!offer) throw new Error(saleMode === "PACKAGE" ? "Harga Paket sudah tidak tersedia." : "Harga Non Paket sudah tidak tersedia.");
     const unitPrice = money(offer.price);
     const surchargePercent = paymentMethod === "CREDIT_CARD" ? 3 : 0;
-    const surchargeAmount = money(unitPrice * surchargePercent / 100);
-    const paymentTotal = money(unitPrice + surchargeAmount);
+    const surchargeAmount = money(unitPrice * quantity * surchargePercent / 100);
+    const paymentTotal = money(unitPrice * quantity + surchargeAmount);
     total = money(total + paymentTotal);
     rows.push({
       vaccineId,
@@ -324,6 +392,8 @@ async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: 
       saleMode,
       salesOptionId: Number(offer.id || 0) || null,
       packageDoseCount: Math.max(1, Number(offer.packageDoseCount || 1)),
+      quantity,
+      startDose,
       unitPrice,
       surchargePercent,
       surchargeAmount,
@@ -369,7 +439,9 @@ async function enrichSelfBookings(supabase: any, rows: any[], sessionId: number)
   return rows.map((row: any) => {
     const participant = participantMap.get(Number(row.participant_id || 0));
     const history = historyMap.get(Number(row.history_person_id || 0));
-    const registration = registrationMap.get(clean(row.employee_id));
+    const candidateRegistration = registrationMap.get(clean(row.employee_id));
+    const registration = candidateRegistration && sameBookingPerson(candidateRegistration, row)
+      ? candidateRegistration : null;
     return {
       ...row,
       participant_name: clean(row.participant_name) || clean(participant?.name || participant?.participant_name) || clean(history?.participant_name) || clean(registration?.participant_name),
@@ -449,6 +521,15 @@ export async function POST(req: NextRequest) {
     const email = clean(body.email ?? booking.email);
     const phone = clean(body.phone ?? booking.phone);
     if (!participantName) return fail("Nama peserta wajib diisi.");
+    // Prevent changing a linked person's identity when merely editing a pending cart.
+    const identityText = (value: any) => clean(value).toUpperCase();
+    if ((Number(booking.history_person_id || 0) || Number(booking.participant_id || 0)) &&
+        identityText(participantName) !== identityText(booking.participant_name)) {
+      return fail("Booking sudah terhubung ke identitas peserta. Gunakan booking berbeda untuk anggota keluarga.", 409);
+    }
+    if (clean(booking.nik) && nik && identityText(booking.nik) !== identityText(nik)) {
+      return fail("NIK KTP tidak cocok dengan pemilik booking. Periksa data sebelum validasi pembayaran.", 409);
+    }
     const selectedItems = Array.isArray(body.selectedItems) ? body.selectedItems : booking.selected_items;
     let prepared: { rows: any[]; total: number };
     try {
@@ -465,6 +546,8 @@ export async function POST(req: NextRequest) {
       saleMode: item.saleMode,
       salesOptionId: item.salesOptionId,
       packageDoseCount: item.packageDoseCount,
+      quantity: item.quantity,
+      startDose: item.startDose,
       unitPrice: item.unitPrice,
     }));
     const updated = await supabase
@@ -503,28 +586,29 @@ export async function POST(req: NextRequest) {
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const session = sessionResult.data;
 
-  // A participant may register Bazar more than once in the same Session,
-  // but the same Bazar product must not be registered twice.
+  // V601: a paid follow-up dose is not the same transaction as dose 1;
+  // the same Employee ID can also belong to several FAMILY persons.
+  // A repeated dose interval for the same actual person remains blocked.
+  let priorBazarItems: any[] = [];
   const selectedVaccineIds = Array.from(new Set((booking.selected_items || []).map((item: any) => Number(item?.vaccine_id || item?.vaccineId || 0)).filter(Boolean)));
   if (selectedVaccineIds.length) {
     const existingItems = await supabase
       .from("vaccination_registration_items")
-      .select("vaccine_id,active,status,vaccine:vaccination_vaccines(id,name),registration:vaccination_registrations!inner(id,session_id,employee_id,bazar_queue_status)")
+      .select("vaccine_id,dose_number,package_dose_count,active,status,vaccine:vaccination_vaccines(id,name),registration:vaccination_registrations!inner(id,session_id,employee_id,participant_id,history_person_id,participant_name,nik,bazar_queue_status)")
       .eq("registration.session_id", sessionId)
       .eq("registration.employee_id", clean(booking.employee_id))
       .eq("service_mode", "BAZAR")
       .eq("active", true)
-      .in("vaccine_id", selectedVaccineIds);
+      .in("vaccine_id", selectedVaccineIds)
+      .limit(10000);
     if (existingItems.error) return fail(existingItems.error.message, 500);
-    const duplicateRows = (existingItems.data || []).filter((row: any) => {
+    priorBazarItems = (existingItems.data || []).filter((row: any) => {
       const itemStatus = clean(row?.status).toUpperCase();
       const registrationStatus = clean(row?.registration?.bazar_queue_status).toUpperCase();
-      return !["CANCELLED", "CANCELED"].includes(itemStatus) && !["CANCELLED", "CANCELED"].includes(registrationStatus);
+      return !["CANCELLED", "CANCELED"].includes(itemStatus) &&
+        !["CANCELLED", "CANCELED"].includes(registrationStatus) &&
+        sameBookingPerson(row?.registration, booking);
     });
-    if (duplicateRows.length) {
-      const names = Array.from(new Set(duplicateRows.map((row: any) => clean(row?.vaccine?.name) || `Produk #${row?.vaccine_id}`).filter(Boolean)));
-      return fail(`Produk Bazar berikut sudah pernah didaftarkan peserta pada Session ini: ${names.join(", ")}. Pilih produk lain.`, 409);
-    }
   }
 
   let prepared: { rows: any[]; total: number };
@@ -532,6 +616,13 @@ export async function POST(req: NextRequest) {
     prepared = await prepareItems(supabase, sessionId, booking.selected_items || [], paymentMethod);
   } catch (error: any) {
     return fail(error?.message || "Produk Self Booking tidak dapat diproses.", 409);
+  }
+
+  // Each NON_PACKAGE quantity is a paid series entitlement; only one clinical
+  // item enters the current Validation flow. Remaining doses require scheduling.
+  const collisions = paidDoseCollisions(priorBazarItems, prepared.rows);
+  if (collisions.length) {
+    return fail(`Dosis Bazar berikut sudah tercatat untuk peserta ini: ${Array.from(new Set(collisions)).join("; ")}. Periksa registrasi sebelumnya atau pilih nomor dosis lanjutan yang belum dibeli.`, 409);
   }
 
   const internalQueue = bazarUsesInternalQueue(session);
@@ -581,16 +672,18 @@ export async function POST(req: NextRequest) {
     session_id: sessionId,
     vaccine_id: item.vaccineId,
     lot_id: item.lotId,
-    dose_number: 1,
+    dose_number: item.startDose,
     price_category: null,
-    price: item.unitPrice,
+    price: money(item.unitPrice * item.quantity),
     payment_method: paymentMethod,
     payment_note: "Self Booking Bazar · pembayaran tervalidasi",
-    item_note: null,
+    item_note: (item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity) > 1
+      ? `PREPAID ${item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity} dosis; mulai dosis ${item.startDose}. Hanya dosis saat kunjungan ini masuk alur Validasi; sisa dosis wajib dijadwalkan terpisah.`
+      : (item.startDose > 1 ? `Dosis lanjutan ke-${item.startDose}; cek riwayat dan interval medis.` : null),
     service_mode: "BAZAR",
     sales_option_id: item.salesOptionId,
     sale_mode: item.saleMode,
-    package_dose_count: item.packageDoseCount,
+    package_dose_count: item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity,
     sales_price_snapshot: item.unitPrice,
     payment_surcharge_percent: item.surchargePercent,
     payment_surcharge_amount: item.surchargeAmount,
