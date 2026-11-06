@@ -611,6 +611,18 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // V603: series is determined ONLY by the product Master, not a name guess.
+  // Never merge Healthday and Bazar payments or infer two administrations today.
+  const seriesMasterResult = selectedVaccineIds.length
+    ? await supabase.from("vaccination_vaccines")
+        .select("id,name,is_series,dose_count")
+        .in("id", selectedVaccineIds)
+    : { data: [], error: null } as any;
+  if (seriesMasterResult.error) return fail(seriesMasterResult.error.message, 500);
+  const seriesMaster = new Map<number, any>(
+    (seriesMasterResult.data || []).map((v: any) => [Number(v.id), v]),
+  );
+
   let prepared: { rows: any[]; total: number };
   try {
     prepared = await prepareItems(supabase, sessionId, booking.selected_items || [], paymentMethod);
@@ -620,9 +632,71 @@ export async function POST(req: NextRequest) {
 
   // Each NON_PACKAGE quantity is a paid series entitlement; only one clinical
   // item enters the current Validation flow. Remaining doses require scheduling.
+  // V603: a second booking of an explicitly configured SERIES may purchase the
+  // next unpurchased dose, but the operator MUST confirm the revised dose before
+  // the payment is validated. No dose is silently shifted; non-series never repeat.
+  const suggestions: { vaccineId: number; vaccineName: string; fromDose: number; toDose: number; quantity: number }[] = [];
+  for (const row of prepared.rows) {
+    const vaccine: any = seriesMaster.get(row.vaccineId);
+    if (!vaccine) return fail(`Produk ${row.vaccineName} tidak ditemukan di Master.`, 409);
+    const isSeries = vaccine.is_series === true;
+    const maxDose = Math.max(1, Number(vaccine.dose_count || 1));
+    const span = row.saleMode === "PACKAGE" ? row.packageDoseCount : row.quantity;
+    const prior = priorBazarItems.filter((item: any) => Number(item.vaccine_id) === row.vaccineId);
+
+    if (!isSeries && (prior.length > 0 || row.startDose !== 1 || (span > 1 && row.saleMode !== "PACKAGE"))) {
+      return fail(`Produk ${row.vaccineName} bukan vaksin series yang aktif di Master. Pembelian ulang produk sama harus ditinjau tim.`, 409);
+    }
+    if (row.startDose + span - 1 > maxDose) {
+      return fail(`${row.vaccineName}: dosis ${row.startDose}-${row.startDose + span - 1} melebihi series ${maxDose} dosis di Master.`, 409);
+    }
+    if (!paidDoseCollisions(prior, [row]).length) continue;
+    if (!isSeries || row.startDose !== 1) {
+      return fail(`Dosis ${row.vaccineName} yang dipilih sudah tercatat untuk peserta ini. Periksa nomor dosis sebelum memvalidasi pembayaran.`, 409);
+    }
+    let nextDose = 0;
+    for (let candidate = 2; candidate + span - 1 <= maxDose; candidate += 1) {
+      const check = { ...row, startDose: candidate };
+      if (!paidDoseCollisions(prior, [check]).length) { nextDose = candidate; break; }
+    }
+    if (!nextDose) {
+      return fail(`Seluruh dosis lanjutan ${row.vaccineName} sudah tercatat atau series ${maxDose} dosis tidak mencukupi.`, 409);
+    }
+    suggestions.push({
+      vaccineId: row.vaccineId,
+      vaccineName: row.vaccineName,
+      fromDose: row.startDose,
+      toDose: nextDose,
+      quantity: span,
+    });
+  }
+
+  if (suggestions.length) {
+    const approvals = Array.isArray(body.confirmedSeriesDoses) ? body.confirmedSeriesDoses : [];
+    const accepted = approvals.length === suggestions.length && suggestions.every((suggestion) =>
+      approvals.some((approval: any) =>
+        Number(approval?.vaccineId) === suggestion.vaccineId &&
+        Number(approval?.toDose) === suggestion.toDose &&
+        Number(approval?.quantity) === suggestion.quantity,
+      ),
+    );
+    if (!accepted) {
+      // No database write on preview. Second request must confirm the precise
+      // suggested ranges; if another booking is processed first, it will change.
+      return ok({
+        requiresSeriesConfirmation: true,
+        message: "Konfirmasi dosis series lanjutan sebelum memvalidasi pembayaran.",
+        suggestions,
+      });
+    }
+    for (const suggestion of suggestions) {
+      const row = prepared.rows.find((item: any) => item.vaccineId === suggestion.vaccineId);
+      if (row) row.startDose = suggestion.toDose;
+    }
+  }
   const collisions = paidDoseCollisions(priorBazarItems, prepared.rows);
   if (collisions.length) {
-    return fail(`Dosis Bazar berikut sudah tercatat untuk peserta ini: ${Array.from(new Set(collisions)).join("; ")}. Periksa registrasi sebelumnya atau pilih nomor dosis lanjutan yang belum dibeli.`, 409);
+    return fail(`Dosis Bazar berikut sudah tercatat untuk peserta ini: ${Array.from(new Set(collisions)).join("; ")}. Periksa registrasi sebelumnya.`, 409);
   }
 
   const internalQueue = bazarUsesInternalQueue(session);

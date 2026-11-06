@@ -383,6 +383,76 @@ export async function GET(req: NextRequest) {
     return fail(error?.message || "Gagal membaca stok/assignment Healthday-Bazar.", 500);
   }
 
+  // V603: matching Bazar's source-of-truth pattern for Session-owned Lots.
+  // Existing session_vaccines may still reference an original/old Lot after
+  // catalog duplication. Recover Healthday options ONLY from an active positive
+  // same-Session Healthday allocation with a matching active Lot and vaccine.
+  // No fallback to stock without allocation; no stock writes or transfers.
+  const recoveredHealthdayCaps = new Map<number, number>();
+  if (serviceStock.enabled) {
+    const eligibleLotIds = Array.from(new Set<number>(
+      Array.from(serviceStock.map.entries())
+        .filter(([key, stock]) => key.endsWith(":HEALTHDAY") && Number(stock?.remaining || 0) > 0)
+        .map(([key]) => Number(key.split(":")[0]))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ));
+    if (eligibleLotIds.length) {
+      const lotsResult = await supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_scope,stock_session_id,active,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
+        .in("id", eligibleLotIds)
+        .eq("stock_scope", "SESSION")
+        .eq("stock_session_id", sessionId)
+        .eq("active", true);
+      if (lotsResult.error) return fail(lotsResult.error.message, 500);
+
+      const movementsResult = await supabase
+        .from("vaccination_inventory_movements")
+        .select("lot_id,movement_type,qty")
+        .in("lot_id", eligibleLotIds)
+        .limit(20000);
+      if (movementsResult.error) return fail(movementsResult.error.message, 500);
+      const movementBuckets = new Map<number, { inbound: number; outbound: number }>();
+      const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
+      const outboundTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
+      for (const movement of movementsResult.data || []) {
+        const lotId = Number((movement as any).lot_id || 0);
+        const type = String((movement as any).movement_type || "").trim().toUpperCase();
+        const entry = movementBuckets.get(lotId) || { inbound: 0, outbound: 0 };
+        if (inboundTypes.has(type)) entry.inbound += Math.abs(Number((movement as any).qty || 0));
+        if (outboundTypes.has(type)) entry.outbound += Math.abs(Number((movement as any).qty || 0));
+        movementBuckets.set(lotId, entry);
+      }
+
+      const known = new Set(options.map((option: any) => `${Number(option.vaccine_id || 0)}:${Number(option.lot_id || 0)}`));
+      for (const lot of lotsResult.data || []) {
+        const lotId = Number((lot as any).id || 0);
+        const vaccineId = Number((lot as any).vaccine_id || 0);
+        const relatedVaccine: any = Array.isArray((lot as any).vaccine) ? (lot as any).vaccine[0] : (lot as any).vaccine;
+        if (!relatedVaccine || relatedVaccine.active === false || Number(relatedVaccine.id || 0) !== vaccineId) continue;
+        const movement = movementBuckets.get(lotId) || { inbound: 0, outbound: 0 };
+        const physical = Math.max(0, Number((lot as any).stock_initial || 0) +
+          Math.max(Number((lot as any).stock_added || 0), movement.inbound) -
+          Number((lot as any).stock_used || 0) - movement.outbound);
+        const allocatedRemaining = Number(serviceStock.map.get(`${lotId}:HEALTHDAY`)?.remaining || 0);
+        const bazarReserved = Math.max(0, Number(serviceStock.map.get(`${lotId}:BAZAR`)?.remaining || 0));
+        const allowed = Math.max(0, Math.min(allocatedRemaining, physical - bazarReserved));
+        if (allowed <= 0) continue;
+        recoveredHealthdayCaps.set(lotId, allowed);
+        const key = `${vaccineId}:${lotId}`;
+        if (!known.has(key)) {
+          healthdayOptions.push({
+            id: `healthday-allocation-${sessionId}-${vaccineId}-${lotId}`,
+            session_id: sessionId, vaccine_id: vaccineId, lot_id: lotId,
+            dose_number: 1, active: true, vaccine: relatedVaccine, lot,
+            option_source: "ACTIVE_HEALTHDAY_SESSION_ALLOCATION",
+          });
+          known.add(key);
+        }
+      }
+    }
+  }
+
   const decorateOption = (option: any, serviceMode: "HEALTHDAY" | "BAZAR") => {
     const lotId = Number(option?.lot_id || option?.lot?.id || 0);
     const stock = lotId ? serviceStock.map.get(`${lotId}:${serviceMode}`) : null;
@@ -393,7 +463,11 @@ export async function GET(req: NextRequest) {
       sales_options: salesOffersByVaccine.get(vaccineId) || [],
       service_stock_allocated: stock ? Number(stock.allocated || 0) : null,
       service_stock_used: stock ? Number(stock.used || 0) : null,
-      service_stock_remaining: stock ? Number(stock.remaining || 0) : null,
+      service_stock_remaining: stock
+        ? (serviceMode === "HEALTHDAY"
+          ? Math.min(Number(stock.remaining || 0), recoveredHealthdayCaps.get(lotId) || 0)
+          : Number(stock.remaining || 0))
+        : null,
     };
   };
 

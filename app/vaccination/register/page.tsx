@@ -137,6 +137,8 @@ export default function VaccinationRegisterPage() {
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
   const [error, setError] = useState("");
   const deepLinkEditHandled = useRef(false);
+  // V603: ignore stale Healthday/Bazar responses when operators switch views.
+  const latestRegisterLoad = useRef(0);
   const [importing, setImporting] = useState(false);
   const [releasingId, setReleasingId] = useState<number | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -702,6 +704,8 @@ export default function VaccinationRegisterPage() {
   }
 
   async function loadRegistrations(sessionId = form.sessionId, sourceId = selectedSourceId) {
+    const loadId = ++latestRegisterLoad.current;
+    const requestedService = activeQueueView;
     if (!sessionId) {
       setRegistrations([]);
       setLocationStockSummary({});
@@ -719,8 +723,9 @@ export default function VaccinationRegisterPage() {
     if (sourceId) params.set("source_id", String(sourceId));
     const [json, stockJson] = await Promise.all([
       fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json()),
-      fetch(`/api/vaccination/register-stock-summary?session_id=${encodeURIComponent(String(sessionId))}&service_mode=${encodeURIComponent(activeQueueView)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, rows: [] })),
+      fetch(`/api/vaccination/register-stock-summary?session_id=${encodeURIComponent(String(sessionId))}&service_mode=${encodeURIComponent(requestedService)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, rows: [] })),
     ]);
+    if (loadId !== latestRegisterLoad.current) return;
     if (json.ok) setRegistrations(json.registrations || []);
     else setError(json.message || "Gagal memuat registrasi.");
     if (stockJson?.ok) {
@@ -755,18 +760,40 @@ export default function VaccinationRegisterPage() {
     setBookingProcessing(true);
     setBookingProcessError("");
     try {
-      const response = await fetch("/api/vaccination/bazar-self-bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "PROCESS",
-          bookingId: Number(processingBooking.id),
-          paymentMethod: bookingPaymentMethod,
-          paymentValidated: true,
-        }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!json.ok) {
+      const submit = async (confirmedSeriesDoses: any[] = []) => {
+        const response = await fetch("/api/vaccination/bazar-self-bookings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "PROCESS",
+            bookingId: Number(processingBooking.id),
+            paymentMethod: bookingPaymentMethod,
+            paymentValidated: true,
+            confirmedSeriesDoses,
+          }),
+        });
+        const json = await response.json().catch(() => ({}));
+        return { response, json };
+      };
+      let { response, json } = await submit();
+      if (json?.requiresSeriesConfirmation === true && Array.isArray(json?.suggestions)) {
+        const proposed = json.suggestions.map((item: any) => {
+          const start = Number(item.toDose || 0);
+          const end = start + Math.max(1, Number(item.quantity || 1)) - 1;
+          return `${item.vaccineName}: lanjut dosis ke-${start}${end > start ? ` s.d. ${end}` : ""}`;
+        }).join("\n");
+        const accepted = window.confirm(
+          `Peserta sudah memiliki pembelian dosis sebelumnya.\n\n${proposed}\n\n` +
+          "Perubahan ini hanya untuk dosis Bazar yang belum dibeli, bukan suntikan otomatis hari ini. " +
+          "Pastikan riwayat peserta dan jadwal medis sesuai.\n\nLanjutkan validasi pembayaran?",
+        );
+        if (!accepted) {
+          setBookingProcessError("Pembayaran belum diproses. Konfirmasi dosis lanjutan dibatalkan operator.");
+          return;
+        }
+        ({ response, json } = await submit(json.suggestions));
+      }
+      if (!json.ok || json?.requiresSeriesConfirmation === true) {
         const messageText = json.message || `Self Booking gagal diproses (${response.status}).`;
         setBookingProcessError(messageText);
         if (response.status === 409 && String(messageText).toLowerCase().includes("produk bazar")) window.alert(messageText);
