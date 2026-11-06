@@ -39,17 +39,52 @@ export async function GET(req: NextRequest) {
       .eq("service_mode", serviceMode)
       .eq("active", true)
       .limit(10000),
-    supabase
-      .from("vaccination_registration_items")
-      .select("id,vaccine_id,lot_id,service_mode,status,active,registration:vaccination_registrations(id,queue_number,bazar_queue_number,queue_status,bazar_queue_status)")
-      .eq("session_id", sessionId)
-      .eq("service_mode", serviceMode)
-      .eq("active", true)
-      .limit(20000),
+    // V605: Healthday avoids an unnecessary PostgREST registration embed;
+    // missing/ambiguous embedded relations must not silently yield stock 0.
+    // Bazar query is intentionally unchanged during the active event.
+    (serviceMode === "HEALTHDAY"
+      ? supabase
+          .from("vaccination_registration_items")
+          .select("id,registration_id,vaccine_id,lot_id,service_mode,status,active")
+          .eq("session_id", sessionId)
+          .eq("service_mode", "HEALTHDAY")
+          .eq("active", true)
+          .limit(20000)
+      : supabase
+          .from("vaccination_registration_items")
+          .select("id,vaccine_id,lot_id,service_mode,status,active,registration:vaccination_registrations(id,queue_number,bazar_queue_number,queue_status,bazar_queue_status)")
+          .eq("session_id", sessionId)
+          .eq("service_mode", serviceMode)
+          .eq("active", true)
+          .limit(20000)),
   ]);
   if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
   if (allocationResult.error) return fail(allocationResult.error.message, 500);
   if (itemResult.error) return fail(itemResult.error.message, 500);
+
+  // V605: attach Healthday queue metadata from a separate, explicit read.
+  // No mutation; preserve exactly the old item/arrival count semantics.
+  let serviceItems: any[] = itemResult.data || [];
+  if (serviceMode === "HEALTHDAY" && serviceItems.length) {
+    const registrationIds = Array.from(new Set<number>(
+      serviceItems.map((item: any) => Number(item.registration_id || 0))
+        .filter((id: number) => Number.isInteger(id) && id > 0),
+    ));
+    if (registrationIds.length) {
+      const registrationResult = await supabase
+        .from("vaccination_registrations")
+        .select("id,queue_number,queue_status")
+        .in("id", registrationIds)
+        .limit(20000);
+      if (registrationResult.error) return fail(registrationResult.error.message, 500);
+      const registrationMap = new Map<number, any>(
+        (registrationResult.data || []).map((row: any) => [Number(row.id), row]),
+      );
+      serviceItems = serviceItems.map((item: any) => ({
+        ...item, registration: registrationMap.get(Number(item.registration_id)) || null,
+      }));
+    }
+  }
 
   const allocations = allocationResult.data || [];
   const lotIds = Array.from(new Set<number>(allocations.map((row: any) => Number(row.lot_id || 0)).filter(Boolean)));
@@ -74,7 +109,7 @@ export async function GET(req: NextRequest) {
   const vaccineIds = new Set<number>();
   for (const row of assignmentResult.data || []) vaccineIds.add(Number((row as any).vaccine_id || 0));
   for (const row of allocations) vaccineIds.add(Number((row as any).vaccine_id || 0));
-  for (const row of itemResult.data || []) vaccineIds.add(Number((row as any).vaccine_id || 0));
+  for (const row of serviceItems) vaccineIds.add(Number((row as any).vaccine_id || 0));
   vaccineIds.delete(0);
 
   const vaccineResult = vaccineIds.size
@@ -95,7 +130,7 @@ export async function GET(req: NextRequest) {
   }
 
   const usedByLot = new Map<number, number>();
-  for (const item of itemResult.data || []) {
+  for (const item of serviceItems) {
     const status = clean((item as any).status).toUpperCase();
     if (!FINAL_ITEM.has(status)) continue;
     const lotId = Number((item as any).lot_id || 0);
@@ -124,7 +159,7 @@ export async function GET(req: NextRequest) {
   // Peserta final/DONE TIDAK ikut registered pending lagi karena stoknya sudah dikonsumsi,
   // tetapi tetap dihitung sebagai pernah datang agar angka operasional tidak kurang.
   const pendingByVaccine = new Map<number, { registered: number; arrived: number; finalized: number }>();
-  for (const item of itemResult.data || []) {
+  for (const item of serviceItems) {
     const status = clean((item as any).status).toUpperCase();
     if (CANCELLED_ITEM.has(status)) continue;
     const vaccineId = Number((item as any).vaccine_id || 0);

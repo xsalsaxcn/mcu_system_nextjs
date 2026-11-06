@@ -122,6 +122,7 @@ export default function VaccinationRegisterPage() {
   const [salesOffers, setSalesOffers] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [locationStockSummary, setLocationStockSummary] = useState<Record<string, any>>({});
+  const [locationStockLoadError, setLocationStockLoadError] = useState("");
   const [selectedStockProductId, setSelectedStockProductId] = useState("");
   const [selfBookings, setSelfBookings] = useState<any[]>([]);
   const [selfBookingLoading, setSelfBookingLoading] = useState(false);
@@ -709,6 +710,7 @@ export default function VaccinationRegisterPage() {
     if (!sessionId) {
       setRegistrations([]);
       setLocationStockSummary({});
+      setLocationStockLoadError("");
       return;
     }
     const queriedSession = sessions.find((item: any) => String(item.id) === String(sessionId));
@@ -716,6 +718,7 @@ export default function VaccinationRegisterPage() {
       // V571: do not load historical participants from a different database.
       setRegistrations([]);
       setLocationStockSummary({});
+      setLocationStockLoadError("");
       return;
     }
     const params = new URLSearchParams();
@@ -732,8 +735,12 @@ export default function VaccinationRegisterPage() {
       const map: Record<string, any> = {};
       for (const row of stockJson.rows || []) map[String(row.vaccineId)] = row;
       setLocationStockSummary(map);
+      setLocationStockLoadError("");
     } else {
+      // Never represent an API failure as a factual zero inventory balance.
       setLocationStockSummary({});
+      setLocationStockLoadError(String(stockJson?.message || stockJson?.error ||
+        "API ringkasan stok tidak berhasil. Tidak ada stok yang dikurangi."));
     }
   }
 
@@ -1537,7 +1544,12 @@ export default function VaccinationRegisterPage() {
                 {productSummary.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </div>
-            {selectedStockSummary ? (
+            {locationStockLoadError ? (
+              <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-900">
+                Ringkasan stok belum berhasil dimuat: {locationStockLoadError}. Ini bukan berarti stok nol. Periksa API sebelum merilis tindakan.
+              </div>
+            ) : null}
+            {selectedStockSummary && !locationStockLoadError ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Terdaftar</div><div className="mt-1 text-xl font-black">{selectedStockSummary.registered}</div></div>
                 <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Sudah Datang</div><div className="mt-1 text-xl font-black">{selectedStockSummary.arrived}</div>{selectedStockSummary.finalized > 0 ? <div className="mt-1 text-[10px] font-bold text-emerald-700">{selectedStockSummary.finalized} sudah selesai</div> : null}</div>
@@ -2403,7 +2415,7 @@ export default function VaccinationRegisterPage() {
                   {registrationProductOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                 </select>
               </div>
-              {selectedStockSummary ? (
+              {selectedStockSummary && !locationStockLoadError ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-[11px] font-black text-slate-700">
                   <span className="text-blue-800">Stok · {selectedStockSummary.name}</span>
                   <span className="rounded-full bg-white px-2 py-1">Lokasi {selectedStockSummary.stockLocation}</span>

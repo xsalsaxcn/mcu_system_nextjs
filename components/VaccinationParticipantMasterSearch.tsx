@@ -442,6 +442,9 @@ export default function VaccinationParticipantMasterSearch({
         ? extra.registeredHealthdayBenefits
         : [],
       walkInRegisteredBenefitSessionId: Number(extra?.registeredBenefitSessionId || 0),
+      walkInSourceHealthdayBenefits: Array.isArray(extra?.sourceHealthdayBenefits)
+        ? extra.sourceHealthdayBenefits : [],
+      walkInSourceBenefitSessionLabel: clean(extra?.sourceBenefitSessionLabel),
       walkInContextLabel: clean(extra?.contextLabel),
       ...(extra?.serviceMode ? { serviceMode: extra.serviceMode } : {}),
     }));
@@ -708,6 +711,10 @@ export default function VaccinationParticipantMasterSearch({
           sourceType: "MOVE_LOCATION",
           moveFromRegistrationId: other.id,
           suggestedVaccineIds: other.vaccineIds || [],
+          // Keep the original Session's benefit visible for the operator.
+          // These are display-only; current Session stock still controls release.
+          sourceHealthdayBenefits: registeredHealthdayBenefits(other?.benefits),
+          sourceBenefitSessionLabel: clean(other?.session?.name || other?.session?.location || "lokasi asal"),
           serviceMode: String(other?.patientServiceStatus || "").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
           contextLabel: `Pindah dari ${other?.session?.name || other?.session?.location || "lokasi lain"}`,
         },

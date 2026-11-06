@@ -121,6 +121,15 @@ export default function VaccinationManualWalkInController({
         )
       : [];
 
+  // Original-site benefit is informational until matched to current-site stock.
+  const sourceHealthdayBenefits = serviceMode === "HEALTHDAY" &&
+    String(form?.masterSearchSource || "") === "MOVE_LOCATION" &&
+    Array.isArray(form?.walkInSourceHealthdayBenefits)
+      ? form.walkInSourceHealthdayBenefits.filter((benefit: any) => Number(benefit?.vaccineId || 0) > 0)
+      : [];
+  const visibleHealthdayBenefits = registeredHealthdayBenefits.length
+    ? registeredHealthdayBenefits : sourceHealthdayBenefits;
+
   const [optionSets, setOptionSets] = useState<OptionState>(EMPTY_OPTIONS);
   const [selectedByMode, setSelectedByMode] =
     useState<SelectionState>(EMPTY_SELECTION);
@@ -252,13 +261,13 @@ export default function VaccinationManualWalkInController({
       Number(item?.vaccine_id || item?.vaccine?.id || 0),
     ),
   );
-  const missingRegisteredHealthdayBenefits = registeredHealthdayBenefits.filter(
+  const missingRegisteredHealthdayBenefits = visibleHealthdayBenefits.filter(
     (benefit: any) => !eligibleHealthdayVaccineIds.has(Number(benefit.vaccineId)),
   );
   const registeredHealthdayStockBlocked =
     serviceMode === "HEALTHDAY" &&
-    isCurrentRegisteredParticipant &&
-    registeredHealthdayBenefits.length > 0 &&
+    (isCurrentRegisteredParticipant || sourceHealthdayBenefits.length > 0) &&
+    visibleHealthdayBenefits.length > 0 &&
     missingRegisteredHealthdayBenefits.length > 0;
 
   const bazarSubtotal = useMemo(
@@ -713,6 +722,11 @@ export default function VaccinationManualWalkInController({
         </div>
       ) : null}
 
+      {error && !activeOptions.length && !loadingOptions ? (
+        <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-3 text-xs font-bold text-rose-900">
+          Gagal memuat produk Session: {error}. Ini bukan bukti stok kosong; periksa API sebelum melanjutkan.
+        </div>
+      ) : null}
       {!sessionId ? (
         <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-xs font-bold text-slate-500">
           Pilih session terlebih dahulu.
@@ -722,16 +736,24 @@ export default function VaccinationManualWalkInController({
           Memuat produk...
         </div>
       ) : healthdayBazarEnabled && serviceMode === "HEALTHDAY" ? (
-        registeredHealthdayBenefits.length ? (
+        visibleHealthdayBenefits.length ? (
           <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
             <div className="text-xs font-black uppercase tracking-wide text-blue-700">
-              Konfirmasi Benefit Healthday Terdaftar
+              {sourceHealthdayBenefits.length && !registeredHealthdayBenefits.length
+                ? "Konfirmasi Benefit dari Session Asal"
+                : "Konfirmasi Benefit Healthday Terdaftar"}
             </div>
             <div className="mt-2 text-base font-black text-slate-900">
-              Atas nama {participantName || "peserta ini"} terdaftar benefit:
+              Atas nama {participantName || "peserta ini"} memiliki benefit:
+              {sourceHealthdayBenefits.length && !registeredHealthdayBenefits.length ? (
+                <span className="mt-1 block text-xs font-semibold text-amber-800">
+                  Session asal: {clean(form?.walkInSourceBenefitSessionLabel) || "lokasi sebelumnya"}.
+                  Pilihan layanan hanya boleh dilanjutkan jika tersedia pada Session saat ini.
+                </span>
+              ) : null}
             </div>
             <div className="mt-3 grid gap-2">
-              {registeredHealthdayBenefits.map((benefit: any) => {
+              {visibleHealthdayBenefits.map((benefit: any) => {
                 const eligibleOption = optionSets.HEALTHDAY.find((item: any) =>
                   Number(item?.vaccine_id || item?.vaccine?.id || 0) === Number(benefit.vaccineId),
                 );
@@ -755,7 +777,7 @@ export default function VaccinationManualWalkInController({
             </div>
             {registeredHealthdayStockBlocked ? (
               <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs font-bold text-amber-900">
-                Registrasi ulang dan rilis antrean Healthday ditahan karena salah satu benefit terdaftar belum memiliki alokasi tersedia. Periksa stok Session/Lot melalui alur Inventory yang sudah ada. Jangan mengganti vaksin peserta dengan produk lain.
+                Registrasi ulang dan rilis antrean Healthday ditahan karena salah satu benefit dari registrasi peserta belum tersedia pada Session ini. Periksa stok Session/Lot atau lokasi asal, jangan mengganti vaksin peserta dengan produk lain.
               </div>
             ) : (
               <div className="mt-3 text-xs font-semibold text-slate-600">

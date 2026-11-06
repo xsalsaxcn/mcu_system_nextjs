@@ -611,16 +611,34 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // V603: series is determined ONLY by the product Master, not a name guess.
-  // Never merge Healthday and Bazar payments or infer two administrations today.
-  const seriesMasterResult = selectedVaccineIds.length
-    ? await supabase.from("vaccination_vaccines")
-        .select("id,name,is_series,dose_count")
-        .in("id", selectedVaccineIds)
-    : { data: [], error: null } as any;
+  // V605: Master stores is_series in vaccination_vaccine_series_settings,
+  // NOT in vaccination_vaccines. The old embedded column fails with HTTP 400.
+  // Read the same two Master sources used by /api/vaccination/master.
+  // Missing/invalid series configuration is fail-closed, never guessed by name.
+  const [seriesMasterResult, seriesSettingsResult] = selectedVaccineIds.length
+    ? await Promise.all([
+        supabase.from("vaccination_vaccines")
+          .select("id,name,dose_count")
+          .in("id", selectedVaccineIds),
+        supabase.from("vaccination_vaccine_series_settings")
+          .select("vaccine_id,is_series,schedule")
+          .in("vaccine_id", selectedVaccineIds),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }] as any[];
   if (seriesMasterResult.error) return fail(seriesMasterResult.error.message, 500);
+  if (seriesSettingsResult.error) {
+    return fail(`Pengaturan Vaksin Series tidak bisa dibaca: ${seriesSettingsResult.error.message}. Tidak ada pembayaran yang diproses.`, 500);
+  }
+  const masterSettings = new Map<number, any>(
+    (seriesSettingsResult.data || []).map((setting: any) => [Number(setting.vaccine_id), setting]),
+  );
   const seriesMaster = new Map<number, any>(
-    (seriesMasterResult.data || []).map((v: any) => [Number(v.id), v]),
+    (seriesMasterResult.data || []).map((v: any) => [Number(v.id), {
+      ...v,
+      is_series: masterSettings.get(Number(v.id))?.is_series === true,
+      // dose_count is stored on the vaccine; schedule is diagnostic only.
+      dose_count: Math.max(1, Number(v.dose_count || 1)),
+    }]),
   );
 
   let prepared: { rows: any[]; total: number };
