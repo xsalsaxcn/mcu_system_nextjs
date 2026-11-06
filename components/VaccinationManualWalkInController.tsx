@@ -135,6 +135,9 @@ export default function VaccinationManualWalkInController({
     useState<SelectionState>(EMPTY_SELECTION);
   const [bazarSaleModeByKey, setBazarSaleModeByKey] = useState<Record<string, "PACKAGE" | "NON_PACKAGE">>({});
   const [loadingOptions, setLoadingOptions] = useState(false);
+  // Keep API loading errors separate from user/form errors. Selecting another
+  // participant must not erase a failed stock-options fetch.
+  const [optionsLoadError, setOptionsLoadError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -145,6 +148,7 @@ export default function VaccinationManualWalkInController({
     setBazarSaleModeByKey({});
     setMessage("");
     setError("");
+    setOptionsLoadError("");
 
     if (!sessionId) {
       setOptionSets({ HEALTHDAY: [], BAZAR: [] });
@@ -181,10 +185,11 @@ export default function VaccinationManualWalkInController({
           HEALTHDAY: healthdayOptions,
           BAZAR: healthdayBazarEnabled ? bazarOptions : [],
         });
+        setOptionsLoadError("");
       } catch (e: any) {
         if (active) {
           setOptionSets({ HEALTHDAY: [], BAZAR: [] });
-          setError(String(e?.message || e || "Gagal memuat pilihan produk."));
+          setOptionsLoadError(String(e?.message || e || "Gagal memuat pilihan produk."));
         }
       } finally {
         if (active) setLoadingOptions(false);
@@ -722,9 +727,9 @@ export default function VaccinationManualWalkInController({
         </div>
       ) : null}
 
-      {error && !activeOptions.length && !loadingOptions ? (
-        <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-3 text-xs font-bold text-rose-900">
-          Gagal memuat produk Session: {error}. Ini bukan bukti stok kosong; periksa API sebelum melanjutkan.
+      {optionsLoadError && !loadingOptions ? (
+        <div role="alert" className="mt-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-3 text-xs font-bold text-rose-900">
+          Gagal memuat produk Session: {optionsLoadError}. Ini bukan bukti stok kosong; periksa API sebelum melanjutkan.
         </div>
       ) : null}
       {!sessionId ? (
@@ -833,7 +838,9 @@ export default function VaccinationManualWalkInController({
           </div>
         ) : (
           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-bold text-amber-800">
-            Belum ada vaksin benefit Healthday aktif untuk session ini.
+            {optionsLoadError
+              ? "Daftar vaksin Healthday gagal dimuat. Periksa pesan API di atas; jangan membuat stok baru atau memilih produk lain."
+              : "Belum ada pilihan vaksin Healthday yang lolos pemeriksaan stok Session/Lot. Periksa alokasi dan produk aktif."}
           </div>
         )
       ) : activeOptions.length ? (

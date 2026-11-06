@@ -38,11 +38,15 @@ async function loadServiceStockRemaining(supabase: any, sessionId: number) {
   if (lotIds.length) {
     const usedResult = await supabase
       .from("vaccination_registration_items")
-      .select("lot_id,service_mode,status,registration:vaccination_registrations!inner(session_id)")
+      // V606: registration_items already has session_id. Query it directly,
+      // just like the working V605 Healthday stock-summary reader. PostgREST's
+      // registration embedded !inner can fail (or hide valid rows) on a legacy
+      // relationship; never make the eligibility list depend on that embed.
+      .select("lot_id,service_mode,status")
+      .eq("session_id", sessionId)
       .in("lot_id", lotIds)
-      .in("status", ["ADMINISTERED", "DONE"])
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
       .eq("active", true)
-      .eq("registration.session_id", sessionId)
       .limit(20000);
 
     if (usedResult.error) throw new Error(usedResult.error.message);
