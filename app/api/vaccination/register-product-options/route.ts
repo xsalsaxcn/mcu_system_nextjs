@@ -410,13 +410,79 @@ export async function GET(req: NextRequest) {
       .limit(10000);
     if (allocatedResult.error) return fail(allocatedResult.error.message, 500);
 
-    const eligible = (allocatedResult.data || []).filter((row: any) => {
+    // V609: Read remaining directly from the SAME active allocation rows.
+    // V608 database audit (Session 179) proved 6 positive allocation balances,
+    // while the older secondary serviceStock map marked every one as zero.
+    // Do not use that independently constructed Map to gate Healthday choices.
+    const allocatedRows: any[] = allocatedResult.data || [];
+    const activeLotIds = Array.from(new Set<number>(
+      allocatedRows.map((row: any) => Number(row?.lot_id || 0))
+        .filter((id: number) => Number.isInteger(id) && id > 0),
+    ));
+    const finalizedByKey = new Map<string, number>();
+    const bazarReservedByLot = new Map<number, number>();
+    if (activeLotIds.length) {
+      // Mirrors the V608 verified SQL: same Session, active items, finalized
+      // status, normalized service mode and exact Lot identity. Fetch statuses
+      // without an SQL case-sensitive filter to match UPPER(TRIM(status)).
+      const [itemsResult, bazarAllocatedResult] = await Promise.all([
+        supabase.from("vaccination_registration_items")
+          .select("lot_id,service_mode,status,active")
+          .eq("session_id", sessionId)
+          .eq("active", true)
+          .in("lot_id", activeLotIds)
+          .limit(20000),
+        supabase.from("vaccination_session_stock_allocations")
+          .select("lot_id,allocated_qty")
+          .eq("session_id", sessionId)
+          .eq("service_mode", "BAZAR")
+          .eq("active", true)
+          .in("lot_id", activeLotIds)
+          .limit(10000),
+      ]);
+      if (itemsResult.error) return fail(itemsResult.error.message, 500);
+      if (bazarAllocatedResult.error) return fail(bazarAllocatedResult.error.message, 500);
+      // Fail closed if pagination would make the finalized-item count partial.
+      if ((itemsResult.data || []).length >= 20000 ||
+          (bazarAllocatedResult.data || []).length >= 10000) {
+        return fail("Data stok Session terlalu banyak untuk pemeriksaan aman; hubungi admin.", 409);
+      }
+      const finalStatuses = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
+      for (const item of itemsResult.data || []) {
+        const status = String((item as any).status || "").trim().toUpperCase();
+        if (!finalStatuses.has(status)) continue;
+        const lotId = Number((item as any).lot_id || 0);
+        const mode = normalizeServiceMode((item as any).service_mode);
+        const key = `${lotId}:${mode}`;
+        finalizedByKey.set(key, (finalizedByKey.get(key) || 0) + 1);
+      }
+      for (const row of bazarAllocatedResult.data || []) {
+        const lotId = Number((row as any).lot_id || 0);
+        if (!lotId) continue;
+        // Conservative: duplicate Bazar rows are summed as reservations.
+        bazarReservedByLot.set(lotId,
+          (bazarReservedByLot.get(lotId) || 0) +
+          Math.max(0, Number((row as any).allocated_qty || 0)));
+      }
+      for (const [lotId, reserved] of bazarReservedByLot.entries()) {
+        bazarReservedByLot.set(lotId,
+          Math.max(0, reserved - (finalizedByKey.get(`${lotId}:BAZAR`) || 0)));
+      }
+    }
+    const healthdayRemainingByLot = new Map<number, number>();
+    const eligible = allocatedRows.filter((row: any) => {
       const lotId = Number(row?.lot_id || 0);
       const vaccineId = Number(row?.vaccine_id || 0);
-      return lotId > 0 && vaccineId > 0 &&
-        Number(serviceStock.map.get(`${lotId}:HEALTHDAY`)?.remaining || 0) > 0;
+      if (!lotId || !vaccineId) return false;
+      const allocated = Math.max(0, Number(row?.allocated_qty || 0));
+      const used = finalizedByKey.get(`${lotId}:HEALTHDAY`) || 0;
+      const remaining = Math.max(0, allocated - used);
+      // A duplicate allocation row must never increase available stock.
+      healthdayRemainingByLot.set(lotId,
+        Math.max(healthdayRemainingByLot.get(lotId) || 0, remaining));
+      return remaining > 0;
     });
-    healthdayOptionDiagnostics.activeAllocations = (allocatedResult.data || []).length;
+    healthdayOptionDiagnostics.activeAllocations = allocatedRows.length;
     healthdayOptionDiagnostics.eligibleAllocatedLots = eligible.length;
     const eligibleLotIds = Array.from(new Set<number>(eligible.map((row: any) => Number(row.lot_id))));
     const eligibleVaccineIds = Array.from(new Set<number>(eligible.map((row: any) => Number(row.vaccine_id))));
@@ -467,6 +533,12 @@ export async function GET(req: NextRequest) {
           healthdayOptionDiagnostics.skippedOwnershipOrProduct += 1;
           continue;
         }
+        // Never expose a BAZAR-labelled product in the Healthday picker even
+        // if a legacy misclassified allocation happens to point to its Lot.
+        if (/(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(String(vaccine.name || ""))) {
+          healthdayOptionDiagnostics.skippedOwnershipOrProduct += 1;
+          continue;
+        }
         healthdayOptionDiagnostics.ownedActiveLots += 1;
         const movement = movements.get(lotId) || { inbound: 0, outbound: 0 };
         const physicalRemaining = Math.max(0,
@@ -474,10 +546,10 @@ export async function GET(req: NextRequest) {
           Math.max(Number(lot.stock_added || 0), movement.inbound) -
           Number(lot.stock_used || 0) - movement.outbound,
         );
-        const allocatedRemaining = Number(serviceStock.map.get(`${lotId}:HEALTHDAY`)?.remaining || 0);
-        // Treat any active Bazar quota sharing this exact Lot as reserved;
-        // never show the same physical doses for both services.
-        const bazarReserved = Math.max(0, Number(serviceStock.map.get(`${lotId}:BAZAR`)?.remaining || 0));
+        const allocatedRemaining = healthdayRemainingByLot.get(lotId) || 0;
+        // Bazar's active reservation is read directly, and separately,
+        // from its own allocations. Never sell/show reserved physical doses.
+        const bazarReserved = bazarReservedByLot.get(lotId) || 0;
         const remaining = Math.max(0, Math.min(allocatedRemaining, physicalRemaining - bazarReserved));
         if (remaining <= 0) {
           healthdayOptionDiagnostics.skippedDepletedOrReserved += 1;
@@ -494,7 +566,7 @@ export async function GET(req: NextRequest) {
           option_source: "ACTIVE_SESSION_HEALTHDAY_ALLOCATION",
           sales_options: salesOffersByVaccine.get(vaccineId) || [],
           service_stock_allocated: Number(allocated.allocated_qty || 0),
-          service_stock_used: Number(serviceStock.map.get(`${lotId}:HEALTHDAY`)?.used || 0),
+          service_stock_used: finalizedByKey.get(`${lotId}:HEALTHDAY`) || 0,
           service_stock_remaining: remaining,
         });
       }
