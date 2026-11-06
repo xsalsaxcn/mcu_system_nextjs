@@ -486,12 +486,18 @@ export default function VaccinationRegisterPage() {
     const map = new Map<string, string>();
     for (const registration of queueReadyRegistrations) {
       const items = Array.isArray(registration?.items) ? registration.items : [];
-      for (const item of items) {
-        const mode = String(item?.service_mode || "HEALTHDAY").toUpperCase();
-        if (healthdayBazarEnabled && mode !== activeQueueView) continue;
+      const matching = items.filter((item: any) => !healthdayBazarEnabled || String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView);
+      for (const item of matching) {
         const vaccineId = String(item?.vaccine_id || "");
         const name = String(item?.vaccine?.name || "Produk").trim();
         if (vaccineId && name && !map.has(vaccineId)) map.set(vaccineId, name);
+      }
+      // A legacy imported benefit may have registration.vaccine_id, but no item
+      // row yet. Show its registered product without fabricating stock.
+      if (!items.length && registration?.vaccine_id && registration?.vaccine?.name &&
+          (!healthdayBazarEnabled || serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A"))) {
+        const vaccineId = String(registration.vaccine_id);
+        if (!map.has(vaccineId)) map.set(vaccineId, String(registration.vaccine.name));
       }
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
@@ -503,18 +509,18 @@ export default function VaccinationRegisterPage() {
 
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    // V601: searching must find imported/unreleased people, without changing
-    // the normal queue list, queue release eligibility, or queue counts.
-    const searchRows = keyword ? sortedRegistrations.filter((registration: any) => {
-      if (!healthdayBazarEnabled) return true;
-      return serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A");
-    }) : queueReadyRegistrations;
+    // V602: global participant lookup stays read-only for the opposite service.
+    // Queue actions, counts, exports and product selection remain service-scoped.
+    const searchRows = keyword ? sortedRegistrations : queueReadyRegistrations;
     return searchRows.filter((registration: any) => {
       const serviceItems = (Array.isArray(registration.items) ? registration.items : []).filter((item: any) => {
         if (!healthdayBazarEnabled) return true;
         return String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView;
       });
-      if (productFilter && !serviceItems.some((item: any) => String(item?.vaccine_id || "") === productFilter)) return false;
+      const hasLegacyVaccine = !serviceItems.length &&
+        (!healthdayBazarEnabled || serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A")) &&
+        String(registration?.vaccine_id || "") === productFilter;
+      if (productFilter && !hasLegacyVaccine && !serviceItems.some((item: any) => String(item?.vaccine_id || "") === productFilter)) return false;
       if (!keyword) return true;
       const haystack = [
         registration.participant_name,
@@ -524,6 +530,10 @@ export default function VaccinationRegisterPage() {
         registration.email,
         registration.phone,
         ...serviceItems.map((item: any) => item?.vaccine?.name),
+        // Legacy imported vaccine is held on the registration row, not item.
+        ...(!serviceItems.length && (!healthdayBazarEnabled || serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A"))
+          ? [registration?.vaccine?.name]
+          : []),
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
@@ -558,6 +568,25 @@ export default function VaccinationRegisterPage() {
         map.set(key, current);
       }
     }
+    // V602: Show legacy imported benefit in product summaries, but do not
+    // count it as an administered vaccine or as available stock.
+    for (const registration of registrations) {
+      const items = Array.isArray(registration?.items) ? registration.items : [];
+      if (items.length || !registration?.vaccine_id || !registration?.vaccine?.name) continue;
+      if (healthdayBazarEnabled && !serviceHasTrack(registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A")) continue;
+      const key = String(registration.vaccine_id);
+      const stock = locationStockSummary[key] || {};
+      const current = map.get(key) || {
+        id: key, name: String(registration.vaccine.name), count: 0,
+        stockLocation: Number(stock.stockLocation || 0),
+        registered: Number(stock.registered || 0),
+        arrived: Number(stock.arrived || 0),
+        finalized: Number(stock.finalized || 0),
+        available: Number(stock.available || 0),
+      };
+      current.count += 1;
+      map.set(key, current);
+    }
     for (const [key, stock] of Object.entries(locationStockSummary)) {
       if (map.has(key)) continue;
       map.set(key, {
@@ -588,6 +617,22 @@ export default function VaccinationRegisterPage() {
       setSelectedStockProductId(productSummary[0].id);
     }
   }, [productSummary, selectedStockProductId]);
+
+  // V602: same participant set, two service views. The headline total is
+  // intentionally not the sum of the service tracks: COMBINATION counts twice.
+  const serviceCoverage = useMemo(() => {
+    const stats = { total: registrations.length, healthday: 0, bazar: 0, both: 0, neither: 0, unlinkedHealthday: 0 };
+    for (const row of registrations) {
+      const a = serviceHasTrack(row?.patient_service_status, "A");
+      const b = serviceHasTrack(row?.patient_service_status, "B");
+      if (a) stats.healthday += 1;
+      if (b) stats.bazar += 1;
+      if (a && b) stats.both += 1;
+      if (!a && !b) stats.neither += 1;
+      if (a && row?.vaccine?.name && !(Array.isArray(row?.items) ? row.items : []).some((item: any) => String(item?.service_mode || "HEALTHDAY").toUpperCase() === "HEALTHDAY")) stats.unlinkedHealthday += 1;
+    }
+    return stats;
+  }, [registrations]);
 
   const summary = useMemo(() => {
     const stats = { total: registrations.length, current: "-", notArrived: 0, waiting: 0, doctor: 0, done: 0 };
@@ -2308,6 +2353,13 @@ export default function VaccinationRegisterPage() {
                 : (healthdayBazarEnabled
                     ? `Pencatatan ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta`
                     : `Pencatatan Session Ini · ${registrations.length} peserta`)}</div>
+              {healthdayBazarEnabled ? (
+                <div className="mt-2 text-xs font-semibold text-slate-600">
+                  Total Session <b>{serviceCoverage.total}</b> · Healthday <b>{serviceCoverage.healthday}</b> · Bazar <b>{serviceCoverage.bazar}</b> · Keduanya <b>{serviceCoverage.both}</b>
+                  {serviceCoverage.neither > 0 ? <> · Perlu cek layanan <b>{serviceCoverage.neither}</b></> : null}
+                  <span className="mt-1 block text-[11px] text-slate-500">Pencarian nama/ID menjangkau seluruh Session. Peserta dari layanan lain hanya ditampilkan sebagai referensi, tanpa tombol tindakan.</span>
+                </div>
+              ) : null}
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <input
                   className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-72"
@@ -2373,6 +2425,22 @@ export default function VaccinationRegisterPage() {
               </thead>
               <tbody className="divide-y">
                 {visibleRegistrations.map((registration) => {
+                  // Search result from a different track must not expose active
+                  // queue, register or edit actions in the current service.
+                  const inCurrentTrack = !healthdayBazarEnabled || serviceHasTrack(
+                    registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A",
+                  );
+                  if (!inCurrentTrack) return (
+                    <tr key={registration.id} className="bg-amber-50/70">
+                      <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-3 text-xs text-amber-900">
+                        <b>{registration.participant_name || "Peserta"}</b> · {registration.employee_id || registration.mcu_id || "ID belum ada"}
+                        <span className="ml-2 rounded-full bg-amber-100 px-2 py-1 font-bold">
+                          Terdaftar di {String(registration?.patient_service_status || "").toUpperCase() === "BAZAR" ? "Bazar" : "layanan lain"}; bukan {activeQueueView}
+                        </span>
+                        <span className="ml-2 text-amber-700">Hanya hasil pencarian. Buka layanan yang sesuai untuk tindakan.</span>
+                      </td>
+                    </tr>
+                  );
                   const info = statusInfo(registration.queue_status);
                   const bazarInfo = statusInfo(registration.bazar_queue_status);
                   const allItems = Array.isArray(registration.items) ? registration.items : [];
@@ -2498,7 +2566,12 @@ export default function VaccinationRegisterPage() {
                               <div key={item.id} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700">
                                 {item.vaccine?.name || "Produk"} · Lot {item.lot?.lot_number || "-"} · {money(item.price)}
                               </div>
-                            )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
+                            )) : (
+                              <span className={registration?.vaccine?.name ? "font-bold text-slate-700" : "font-semibold text-amber-700"}>
+                                {registration?.vaccine?.name || "Item vaksin belum tercatat"}
+                                {registration?.vaccine?.name ? <span className="ml-1 text-[10px] text-amber-600">(data import)</span> : null}
+                              </span>
+                            )}
                           </div>
                         </td>
                         {activeQueueView === "BAZAR" ? <><td className="p-3 align-top font-bold">{paymentMethodLabel(activePaymentMethod)}</td><td className="p-3 align-top"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td></> : null}
@@ -2527,7 +2600,12 @@ export default function VaccinationRegisterPage() {
                             <div key={item.id} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700">
                               {item.vaccine?.name || "Produk"} · Lot {item.lot?.lot_number || "-"} · {money(item.price)}
                             </div>
-                          )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
+                            )) : (
+                              <span className={registration?.vaccine?.name ? "font-bold text-slate-700" : "font-semibold text-amber-700"}>
+                                {registration?.vaccine?.name || "Item vaksin belum tercatat"}
+                                {registration?.vaccine?.name ? <span className="ml-1 text-[10px] text-amber-600">(data import)</span> : null}
+                              </span>
+                            )}
                         </div>
                       </td>
                       {activeQueueView === "BAZAR" ? <><td className="p-3 font-bold">{paymentMethodLabel(activePaymentMethod)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td></> : null}

@@ -100,6 +100,21 @@ function registrationPriority(row: any) {
   return score;
 }
 
+// Display-only choice priority; never edits registration/service status.
+function registrationTrackPriority(row: any, selectedMode: "HEALTHDAY" | "BAZAR") {
+  const status = clean(row?.patient_service_status || "HEALTHDAY").toUpperCase();
+  const hasTrack = selectedMode === "HEALTHDAY"
+    ? status === "HEALTHDAY" || status === "COMBINATION"
+    : status === "BAZAR" || status === "COMBINATION";
+  const matchingItems = (Array.isArray(row?.items) ? row.items : []).filter((item: any) =>
+    clean(item?.service_mode || "HEALTHDAY").toUpperCase() === selectedMode && item?.active !== false,
+  );
+  return (hasTrack ? 1000 : 0) +
+    (matchingItems.length ? 500 : 0) +
+    (hasTrack && row?.vaccine_id ? 50 : 0) +
+    registrationPriority(row);
+}
+
 export default function VaccinationParticipantMasterSearch({
   form,
   setForm,
@@ -334,7 +349,12 @@ export default function VaccinationParticipantMasterSearch({
 
       const key = sessionPersonKey(row);
       const current = grouped.get(key);
-      if (!current || registrationPriority(row) > registrationPriority(current)) {
+      // V602: when the same person has separate Bazar and Healthday rows,
+      // select the registration for the operator's current service. Otherwise
+      // a completed Bazar row can hide the participant's free benefit.
+      const currentService = String(form?.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      const rowScore = registrationTrackPriority(row, currentService);
+      if (!current || rowScore > registrationTrackPriority(current, currentService)) {
         grouped.set(key, row);
       }
     }
@@ -344,7 +364,7 @@ export default function VaccinationParticipantMasterSearch({
         clean(a?.participant_name).localeCompare(clean(b?.participant_name), "id"),
       )
       .slice(0, 60);
-  }, [sessionRegistrations, currentQuery]);
+  }, [sessionRegistrations, currentQuery, form?.serviceMode]);
 
   function applyParticipant(row: any, extra: any = {}) {
     const participantId = Number(row?.participantId || row?.participant_id || 0) || null;
@@ -449,12 +469,17 @@ export default function VaccinationParticipantMasterSearch({
 
   function chooseCurrentRegistration(row: any) {
     const currentHealthdayVaccineIds = (Array.isArray(row?.items) ? row.items : [])
-      .filter((item: any) => clean(item?.service_mode || "HEALTHDAY").toUpperCase() !== "BAZAR")
+      .filter((item: any) => item?.active !== false && clean(item?.service_mode || "HEALTHDAY").toUpperCase() !== "BAZAR")
       .map((item: any) => String(item?.vaccine_id || item?.vaccine?.id || ""))
       .filter(Boolean);
-    if (!currentHealthdayVaccineIds.length && row?.vaccine_id) {
-      currentHealthdayVaccineIds.push(String(row.vaccine_id));
-    }
+    const status = clean(row?.patient_service_status || "HEALTHDAY").toUpperCase();
+    const registeredHealthdayTrack = status === "HEALTHDAY" || status === "COMBINATION";
+    // Legacy imports can store a beneficiary vaccine directly on the
+    // registration row, without vaccination_registration_items yet.
+    const legacyBenefits = registeredHealthdayTrack && row?.vaccine_id && row?.vaccine?.name && !currentHealthdayVaccineIds.length
+      ? [{ vaccineId: Number(row.vaccine_id), name: clean(row.vaccine.name), brand: clean(row.vaccine?.brand), status: "IMPORTED" }]
+      : [];
+    if (legacyBenefits.length) currentHealthdayVaccineIds.push(String(row.vaccine_id));
 
     applyParticipant(row, {
       sourceType: "CURRENT_SESSION",
@@ -462,7 +487,10 @@ export default function VaccinationParticipantMasterSearch({
       // V513: carry the participant's registered Healthday vaccine into the
       // Healthday confirmation pop-up. Bazar mode ignores/clears this selection.
       suggestedVaccineIds: Array.from(new Set(currentHealthdayVaccineIds)),
-      registeredHealthdayBenefits: registeredHealthdayBenefits(row?.items),
+      registeredHealthdayBenefits: [
+        ...registeredHealthdayBenefits(row?.items),
+        ...legacyBenefits,
+      ],
       registeredBenefitSessionId: Number(row?.session_id || session?.id || 0),
       contextLabel: `Terdaftar di ${session?.session_name || session?.location || "session ini"}`,
     });
@@ -897,7 +925,7 @@ export default function VaccinationParticipantMasterSearch({
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                    Lokasi Ini
+                    {String(row?.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
                   </span>
                 </button>
               ))}
