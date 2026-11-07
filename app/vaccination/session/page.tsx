@@ -196,10 +196,12 @@ export default function VaccinationSessionPage() {
     existingFlowDoctorEnabled: false,
   });
 
-  // V611: independent, append-only mapping dialog for an EXISTING Session.
+  // V612: add-only import BatchName mapping INLINE in section 3.
   const [batchConfigSession, setBatchConfigSession] = useState<any | null>(null);
   const [batchConfigName, setBatchConfigName] = useState("");
   const [batchConfigVaccineKey, setBatchConfigVaccineKey] = useState("");
+  const [batchConfigNames, setBatchConfigNames] = useState<string[]>([]);
+  const [batchConfigLoading, setBatchConfigLoading] = useState(false);
   const [batchConfigSaving, setBatchConfigSaving] = useState(false);
   const [batchConfigError, setBatchConfigError] = useState("");
   const [selectedSessionIds, setSelectedSessionIds] = useState<number[]>([]);
@@ -270,8 +272,15 @@ export default function VaccinationSessionPage() {
       if (single) names.add(single);
     });
 
+    // Existing Session mappings remain visible even if the import location
+    // summary did not expose the original BatchName.
+    (selectedExistingSession?.batch_mappings || []).forEach((mapping: any) => {
+      const text = String(mapping.source_batch_name || "").trim();
+      if (text) names.add(text);
+    });
+
     return Array.from(names.values()).sort((a, b) => a.localeCompare(b));
-  }, [form.locationKey, locations]);
+  }, [form.locationKey, locations, selectedExistingSession]);
 
   const sessionVaccineOptions = useMemo(() => {
     return sessionVaccines.map((item) => {
@@ -449,12 +458,47 @@ export default function VaccinationSessionPage() {
     return `Lot ${lot.lot_number} · exp ${lot.expiry_date || "-"}`;
   }
 
+  async function openAdditionalBatchMapping() {
+    if (!selectedExistingSession || !currentSessionId) {
+      setError("Pilih lalu simpan Session terlebih dahulu sebelum menambah mapping BatchName.");
+      return;
+    }
+    const targetSession = selectedExistingSession;
+    setBatchConfigSession(targetSession);
+    setBatchConfigName("");
+    setBatchConfigVaccineKey("");
+    setBatchConfigNames([]);
+    setBatchConfigError("");
+    setBatchConfigLoading(true);
+    try {
+      const response = await fetch(
+        `/api/vaccination/sessions?mode=import-batches&session_id=${encodeURIComponent(String(targetSession.id))}`,
+        { cache: "no-store" },
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "Gagal membaca BatchName dari database import.");
+      }
+      const mapped = new Set(
+        (targetSession.batch_mappings || []).map((row: any) => normalizeBatchName(row.source_batch_name)),
+      );
+      setBatchConfigNames(
+        (result.batchNames || []).filter((name: string) => !mapped.has(normalizeBatchName(name))),
+      );
+    } catch (error: any) {
+      setBatchConfigError(error?.message || "BatchName dari database import gagal dimuat.");
+    } finally {
+      setBatchConfigLoading(false);
+    }
+  }
+
   async function saveAdditionalBatchMapping() {
     if (!batchConfigSession || batchConfigSaving) return;
     const [vaccineId, lotId, doseNumber] = batchConfigVaccineKey.split("|").map(Number);
     const sourceBatchName = batchConfigName.trim();
-    if (!sourceBatchName || !vaccineId || !lotId || !doseNumber) {
-      setBatchConfigError("Isi BatchName dan pilih vaksin/Lot aktif.");
+    if (!batchConfigNames.some((name) => normalizeBatchName(name) === normalizeBatchName(sourceBatchName)) ||
+        !vaccineId || !lotId || !doseNumber) {
+      setBatchConfigError("Pilih BatchName dari hasil import dan vaksin/Lot aktif Session.");
       return;
     }
     setBatchConfigSaving(true);
@@ -462,7 +506,7 @@ export default function VaccinationSessionPage() {
     try {
       const response = await fetch("/api/vaccination/sessions", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add-batch-mapping", sessionId: batchConfigSession.id,
+        body: JSON.stringify({ action: "add-import-batch-mapping", sessionId: batchConfigSession.id,
           sourceBatchName, vaccineId, lotId, doseNumber }),
       });
       const result = await response.json().catch(() => ({}));
@@ -471,7 +515,8 @@ export default function VaccinationSessionPage() {
       setBatchConfigSession(null);
       setBatchConfigName("");
       setBatchConfigVaccineKey("");
-      setMessage(result.message || "BatchName berhasil dikonfigurasi.");
+      setBatchConfigNames([]);
+      setMessage(result.message || "Mapping BatchName dari import berhasil ditambahkan.");
     } catch (error: any) {
       setBatchConfigError(error?.message || "Gagal menyimpan mapping BatchName.");
     } finally { setBatchConfigSaving(false); }
@@ -1416,6 +1461,14 @@ export default function VaccinationSessionPage() {
   }, [selectedExistingSession, availableBatchNames.join("|")]);
 
   useEffect(() => {
+    setBatchConfigSession(null);
+    setBatchConfigName("");
+    setBatchConfigVaccineKey("");
+    setBatchConfigNames([]);
+    setBatchConfigError("");
+  }, [currentSessionId]);
+
+  useEffect(() => {
     if (selectedSource && !form.companyName) {
       setForm((prev) => ({
         ...prev,
@@ -1858,12 +1911,24 @@ export default function VaccinationSessionPage() {
           </div>
 
 
-          {availableBatchNames.length ? (
+          {(availableBatchNames.length > 0 || Boolean(selectedExistingSession)) ? (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-              <div className="font-black text-amber-900">3. Pemetaan Produk Peserta</div>
-              <p className="mt-1 text-sm text-amber-800">
-                Pengaturan yang sudah tersimpan tetap dipertahankan. Pilihan hanya menampilkan produk session yang sudah memiliki lot aktif.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-black text-amber-900">3. Pemetaan Produk Peserta</div>
+                  <p className="mt-1 text-sm text-amber-800">
+                    Hubungkan nama Batch/Layanan pada Excel import ke vaksin dan Lot aktif Session ini. Mapping lama tetap dipertahankan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!selectedExistingSession || !sessionVaccineOptions.length || batchConfigLoading || batchConfigSaving}
+                  onClick={() => void openAdditionalBatchMapping()}
+                  className="rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  + Tambah Mapping
+                </button>
+              </div>
               {!sessionVaccines.length ? (
                 <div className="mt-3 rounded-xl bg-white p-3 text-sm font-bold text-red-700">
                   Belum ada produk dengan lot aktif untuk session ini. Tambahkan lot di Master Produk & Lot terlebih dahulu.
@@ -1898,9 +1963,61 @@ export default function VaccinationSessionPage() {
                         </td>
                       </tr>
                     ))}
+                    {!batchMappings.length ? (
+                      <tr><td colSpan={2} className="p-4 text-sm text-slate-500">Belum ada BatchName untuk lokasi ini. Klik + Tambah Mapping untuk membaca hasil import Excel.</td></tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
+              {batchConfigSession && Number(batchConfigSession.id) === currentSessionId ? (
+                <div className="mt-4 rounded-2xl border border-amber-300 bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-black text-amber-900">Tambah mapping dari Excel — Session ini</div>
+                    <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-bold"
+                      disabled={batchConfigSaving}
+                      onClick={() => { setBatchConfigSession(null); setBatchConfigError(""); }}>
+                      Batal
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">
+                    BatchName diambil dari baris import milik sumber, lokasi, dan tanggal Session ini; tidak bisa diketik bebas.
+                  </p>
+                  {batchConfigLoading ? <div className="mt-3 text-sm text-slate-500">Membaca BatchName dari import...</div> : (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="block text-xs font-bold text-slate-700">BatchName import yang belum dipetakan
+                        <select value={batchConfigName} onChange={(e) => setBatchConfigName(e.target.value)}
+                          className="mt-2 w-full rounded-xl border px-3 py-3 text-sm">
+                          <option value="">Pilih BatchName dari database...</option>
+                          {batchConfigNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block text-xs font-bold text-slate-700">Vaksin / Lot tersedia di Session
+                        <select value={batchConfigVaccineKey} onChange={(e) => setBatchConfigVaccineKey(e.target.value)}
+                          className="mt-2 w-full rounded-xl border px-3 py-3 text-sm">
+                          <option value="">Pilih produk / Lot...</option>
+                          {sessionVaccineOptions.map((option) => (
+                            <option key={option.key} value={option.key}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                  {!batchConfigLoading && !batchConfigNames.length && !batchConfigError ? (
+                    <p className="mt-3 text-xs font-semibold text-amber-800">
+                      Semua BatchName hasil import yang ditemukan sudah dipetakan, atau tidak ada BatchName untuk lokasi/tanggal ini.
+                    </p>
+                  ) : null}
+                  {batchConfigError ? (
+                    <div className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{batchConfigError}</div>
+                  ) : null}
+                  <button type="button"
+                    disabled={batchConfigLoading || batchConfigSaving || !batchConfigName || !batchConfigVaccineKey}
+                    onClick={() => void saveAdditionalBatchMapping()}
+                    className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-40">
+                    {batchConfigSaving ? "Menyimpan..." : "Simpan Mapping Baru"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -2087,19 +2204,6 @@ export default function VaccinationSessionPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              setBatchConfigSession(session);
-                              setBatchConfigName("");
-                              setBatchConfigVaccineKey("");
-                              setBatchConfigError("");
-                            }}
-                            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"
-                            title="Tambah BatchName manual tanpa mengubah mapping lama atau peserta"
-                          >
-                            ⚙ Mapping Batch
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => resetSessionTestingData(session)}
                             disabled={resettingSessionId === Number(session.id)}
                             className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2129,57 +2233,6 @@ export default function VaccinationSessionPage() {
             </table>
           </div>
         </section>
-
-        {batchConfigSession ? (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
-            <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
-              <div className="flex items-start justify-between gap-3">
-                <div><div className="text-xs font-bold uppercase text-emerald-700">Konfigurasi BatchName</div>
-                  <h3 className="mt-1 text-xl font-black">{batchConfigSession.session_name}</h3>
-                  <div className="mt-1 text-xs text-slate-500">Tambah mapping baru saja; mapping lama, peserta, antrean dan stok tidak diubah.</div>
-                </div>
-                <button type="button" onClick={() => setBatchConfigSession(null)} className="rounded-xl border px-3 py-2 text-xs font-bold">Tutup</button>
-              </div>
-              <div className="mt-4 rounded-xl border bg-slate-50 p-3 text-xs">
-                <div className="font-black">Mapping yang sudah aktif</div>
-                {(batchConfigSession.batch_mappings || []).length ?
-                  (batchConfigSession.batch_mappings || []).map((entry: any) => {
-                    const vaccine = (batchConfigSession.session_vaccines || []).find((row: any) =>
-                      Number(row.vaccine_id) === Number(entry.vaccine_id) && Number(row.lot_id) === Number(entry.lot_id));
-                    return <div key={entry.id} className="mt-2 flex justify-between gap-3 border-t pt-2">
-                      <span>{entry.source_batch_name}</span>
-                      <span className="font-bold">{vaccine?.vaccine?.name || entry.vaccine_id} · Lot {vaccine?.lot?.lot_number || entry.lot_id}</span>
-                    </div>;
-                  }) : <div className="mt-2 text-slate-500">Belum ada mapping.</div>}
-              </div>
-              <label className="mt-4 block text-xs font-black text-slate-700">BatchName dari import atau nama manual
-                <input type="text" maxLength={160} value={batchConfigName}
-                  onChange={e => setBatchConfigName(e.target.value)}
-                  className="mt-2 w-full rounded-xl border px-3 py-3 text-sm" placeholder="Contoh: Vaksin Typhoid" />
-              </label>
-              <label className="mt-4 block text-xs font-black text-slate-700">Produk dan Lot aktif pada Session ini
-                <select value={batchConfigVaccineKey} onChange={e => setBatchConfigVaccineKey(e.target.value)}
-                  className="mt-2 w-full rounded-xl border px-3 py-3 text-sm">
-                  <option value="">Pilih vaksin/Lot...</option>
-                  {(batchConfigSession.session_vaccines || []).filter((item: any) => item.active !== false).map((item: any) => (
-                    <option key={item.id} value={`${item.vaccine_id}|${item.lot_id}|${item.dose_number || 1}`}>
-                      {item.vaccine?.name || `Vaksin ${item.vaccine_id}`} · Lot {item.lot?.lot_number || item.lot_id} · Dosis {item.dose_number || 1}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {batchConfigError ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{batchConfigError}</div> : null}
-              <div className="mt-5 flex justify-end gap-2">
-                <button type="button" onClick={() => setBatchConfigSession(null)} className="rounded-xl border px-4 py-3 text-sm font-bold">Batal</button>
-                <button type="button" disabled={batchConfigSaving || !batchConfigName.trim() || !batchConfigVaccineKey}
-                  onClick={() => void saveAdditionalBatchMapping()}
-                  className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white disabled:opacity-40">
-                  {batchConfigSaving ? "Menyimpan..." : "Tambah Mapping"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         {editingSession ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">

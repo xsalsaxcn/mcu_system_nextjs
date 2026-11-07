@@ -661,6 +661,42 @@ async function insertSessionVaccines(
   if (svResult.error) throw new Error(svResult.error.message);
 }
 
+// V612: BatchName source-of-truth is the persisted Excel import, not Master
+// product rows or manually entered text. Read only exact Session source/location.
+async function readImportedSessionBatchNames(supabase: any, session: any): Promise<string[]> {
+  const sourceId = toInt(session?.source_id, 0);
+  if (!sourceId) throw new Error("Session ini tidak terhubung ke sumber import Excel.");
+  const date = clean(session.session_date).slice(0, 10);
+  const location = normalizeKey(session.location);
+  const importKey = clean(session.import_location_key);
+  if (!date || (!location && !importKey)) {
+    throw new Error("Lokasi/tanggal Session belum cukup untuk membaca BatchName dari import.");
+  }
+
+  const unique = new Map<string, string>();
+  const pageSize = 1000;
+  for (let offset = 0; offset < 20000; offset += pageSize) {
+    const query = await supabase.from("vaccination_import_rows")
+      .select("batch_name,location_name,time_area_name,session_date,import_location_key")
+      .eq("source_id", sourceId)
+      .range(offset, offset + pageSize - 1);
+    if (query.error) throw new Error(query.error.message);
+    const rows = query.data || [];
+    for (const row of rows) {
+      const sameImportKey = Boolean(importKey && clean(row.import_location_key) &&
+        clean(row.import_location_key) === importKey);
+      const sameLocationDate = Boolean(date && location &&
+        clean(row.session_date).slice(0, 10) === date &&
+        normalizeKey(clean(row.location_name) || clean(row.time_area_name)) === location);
+      if (!sameImportKey && !sameLocationDate) continue;
+      const name = clean(row.batch_name);
+      if (name && !unique.has(name.toLowerCase())) unique.set(name.toLowerCase(), name);
+    }
+    if (rows.length < pageSize) return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
+  }
+  throw new Error("Baris sumber import melebihi batas aman audit (20.000). Hubungi IT untuk pemeriksaan khusus.");
+}
+
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -671,6 +707,24 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = supabaseAdmin();
+  if (req.nextUrl.searchParams.get("mode") === "import-batches") {
+    if (!canVaccinationAccess(user, "session")) {
+      return fail("Akses konfigurasi mapping Session ditolak.", 403);
+    }
+    const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
+    if (!sessionId) return fail("Session belum dipilih.", 400);
+    const sessionRead = await supabase.from("vaccination_sessions")
+      .select("id,source_id,location,session_date,import_location_key")
+      .eq("id", sessionId).maybeSingle();
+    if (sessionRead.error) return fail(sessionRead.error.message, 500);
+    if (!sessionRead.data) return fail("Session tidak ditemukan.", 404);
+    try {
+      const batchNames = await readImportedSessionBatchNames(supabase, sessionRead.data);
+      return ok({ sessionId, batchNames });
+    } catch (error: any) {
+      return fail(`Gagal memuat BatchName import: ${error?.message || ""}`, 409);
+    }
+  }
   const result = await supabase
     .from("vaccination_sessions")
     .select("*")
@@ -875,9 +929,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // V611: Add one manual BatchName mapping only. No session re-sync, inventory,
-  // participant change, existing mapping overwrite, or queue modification.
-  if (action === "add-batch-mapping") {
+  // V612: import-backed, add-only mapping. Legacy manual action retained for
+  // compatibility but no longer offered in the Session UI.
+  if (action === "add-batch-mapping" || action === "add-import-batch-mapping") {
     const sessionId = toInt(body.sessionId, 0);
     const sourceBatchName = clean(body.sourceBatchName);
     const vaccineId = toInt(body.vaccineId, 0);
@@ -888,9 +942,21 @@ export async function POST(req: NextRequest) {
       return fail("Isi BatchName, vaksin dan Lot yang benar.", 400);
     }
     const sessionRead = await supabase.from("vaccination_sessions")
-      .select("id,source_id,company_name").eq("id", sessionId).maybeSingle();
+      .select("id,source_id,company_name,location,session_date,import_location_key")
+      .eq("id", sessionId).maybeSingle();
     if (sessionRead.error) return fail(sessionRead.error.message, 500);
     if (!sessionRead.data) return fail("Session tidak ditemukan.", 404);
+    if (action === "add-import-batch-mapping") {
+      let importedNames: string[] = [];
+      try {
+        importedNames = await readImportedSessionBatchNames(supabase, sessionRead.data);
+      } catch (error: any) {
+        return fail(`Tidak bisa memverifikasi BatchName Excel: ${error?.message || ""}`, 409);
+      }
+      if (!importedNames.some((name) => name.toLowerCase() === sourceBatchName.toLowerCase())) {
+        return fail("BatchName tidak ditemukan pada Excel import untuk Session ini. Mapping tidak disimpan.", 409);
+      }
+    }
     const assignment = await supabase.from("vaccination_session_vaccines")
       .select("id,session_id,vaccine_id,lot_id,dose_number,active")
       .eq("session_id", sessionId).eq("vaccine_id", vaccineId)
