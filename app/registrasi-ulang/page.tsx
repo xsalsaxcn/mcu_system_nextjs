@@ -889,6 +889,11 @@ function RegistrasiUlang({ user }: { user: any }) {
         keyword: keyword.trim(),
         limit: "200"
       });
+      // MCU_CORPORATE_RETRIEVE_EXACT_SESSION_FULL_ROSTER_V530_3
+      // Exact Corporate Session uses server-side batched retrieval, not a 200 cap.
+      if (program === "corporate" && getSelectedSessionContext()?.queue_session_id) {
+        params.delete("limit");
+      }
 
       const res = await fetch(`/api/registrasi-ulang/search?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();

@@ -318,6 +318,139 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // MCU_CORPORATE_SESSION_METADATA_EDIT_V529
+    // Update existing Session metadata only. Never generate a new Session ID,
+    // change company/package/location/tracks/token, or touch participant/queue rows.
+    if (action === "edit-location-session-metadata") {
+      const queueSessionId = Number(body.queue_session_id || 0);
+      if (!Number.isSafeInteger(queueSessionId) || queueSessionId <= 0 || !companyId || !packageId) {
+        return json({ ok: false, message: "Session, perusahaan, dan paket wajib valid." }, 400);
+      }
+
+      const nextName = String(body.session_name ?? "").trim();
+      const nextDate = String(body.session_date ?? "").trim();
+      if (!nextName || nextName.length > 160) {
+        return json({ ok: false, message: "Nama Session wajib diisi (maksimal 160 karakter)." }, 400);
+      }
+      const validDate = (value: string) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const parsed = new Date(`${value}T00:00:00.000Z`);
+        return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+      if (nextDate && !validDate(nextDate)) {
+        return json({ ok: false, message: "Tanggal MCU tidak valid. Gunakan YYYY-MM-DD." }, 400);
+      }
+
+      const currentRes = await supabase
+        .from("mcu_queue_sessions")
+        .select("id,company_id,package_id,location,session_name,session_date")
+        .eq("id", queueSessionId)
+        .maybeSingle();
+      if (currentRes.error) throw new Error(queueSchemaErrorMessage(currentRes.error));
+      const current = currentRes.data;
+      if (!current) return json({ ok: false, message: "Session tidak ditemukan." }, 404);
+      if (Number(current.company_id) !== companyId || Number(current.package_id) !== packageId) {
+        return json({ ok: false, message: "Session tidak berada pada perusahaan/paket yang dipilih." }, 403);
+      }
+
+      const oldName = String(current.session_name || "").trim();
+      const oldDate = String(current.session_date || "").slice(0, 10);
+      const expectedName = String(body.expected_session_name ?? "").trim();
+      const expectedDate = String(body.expected_session_date ?? "").slice(0, 10);
+      if (oldName !== expectedName || oldDate !== expectedDate) {
+        return json({ ok: false, message: "Data Session telah berubah. Refresh halaman sebelum Edit lagi." }, 409);
+      }
+      if (!nextDate && oldDate) {
+        return json({ ok: false, message: "Tanggal yang sudah ada tidak boleh dikosongkan." }, 400);
+      }
+      if (!nextDate && !oldDate) {
+        // Legacy sessions may have no date; allow name-only edit safely.
+        if (nextName === oldName) return json({ ok: true, queue_session: current, message: "Tidak ada perubahan." });
+      }
+
+      if (nextDate && nextDate !== oldDate) {
+        // Prevent collisions with another session at the same company, package,
+        // location and date. Do not move participants or merge sessions.
+        let duplicateQuery = supabase
+          .from("mcu_queue_sessions")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("package_id", packageId)
+          .eq("session_date", nextDate)
+          .neq("id", queueSessionId)
+          .limit(1);
+        const currentLocation = String(current.location || "").trim();
+        duplicateQuery = currentLocation
+          ? duplicateQuery.eq("location", current.location)
+          : duplicateQuery.is("location", null);
+        const duplicates = await duplicateQuery;
+        if (duplicates.error) throw new Error(queueSchemaErrorMessage(duplicates.error));
+        if ((duplicates.data || []).length) {
+          return json({ ok: false, message: "Sudah ada Session lain dengan perusahaan, paket, lokasi, dan tanggal tersebut." }, 409);
+        }
+
+        // Dates are duplicated into some operational records. A date change
+        // must be rejected after an assignment, registration or queue exists;
+        // those records must never be silently desynchronized or mutated.
+        const checks = await Promise.all([
+          supabase.from("mcu_participant_session_assignments")
+            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
+          supabase.from("mcu_registration_sessions")
+            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
+          supabase.from("mcu_queue_entries")
+            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
+          supabase.from("mcu_queue_informed")
+            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
+        ]);
+        for (const check of checks) {
+          if (check.error) throw new Error(queueSchemaErrorMessage(check.error));
+        }
+        if (checks.some((check) => (check.data || []).length > 0)) {
+          return json({
+            ok: false,
+            message: "Tanggal tidak dapat diubah: Session sudah memiliki peserta/registrasi/antrean/informed. Nama Session masih dapat diedit tanpa mengubah data operasional.",
+          }, 409);
+        }
+      }
+
+      if (nextName === oldName && (nextDate || "") === oldDate) {
+        return json({ ok: true, queue_session: current, message: "Tidak ada perubahan." });
+      }
+
+      // Strict update allowlist: only session_name + session_date (if changed)
+      // and updated_at. All identity, links, tracks and public tokens preserved.
+      const updateFields: { session_name: string; session_date?: string; updated_at: string } = {
+        session_name: nextName,
+        updated_at: new Date().toISOString(),
+      };
+      if (nextDate && nextDate !== oldDate) updateFields.session_date = nextDate;
+
+      // Compare-and-swap: protect against a concurrent metadata edit.
+      // If session_name/date changed since opening the editor, fail closed.
+      let updateQuery = supabase
+        .from("mcu_queue_sessions")
+        .update(updateFields)
+        .eq("id", queueSessionId)
+        .eq("company_id", companyId)
+        .eq("package_id", packageId);
+      updateQuery = current.session_name == null
+        ? updateQuery.is("session_name", null)
+        : updateQuery.eq("session_name", current.session_name);
+      updateQuery = current.session_date == null
+        ? updateQuery.is("session_date", null)
+        : updateQuery.eq("session_date", current.session_date);
+      const updateRes = await updateQuery.select("*").maybeSingle();
+      if (updateRes.error) throw new Error(queueSchemaErrorMessage(updateRes.error));
+      if (!updateRes.data) {
+        return json({ ok: false, message: "Session berubah bersamaan. Refresh lalu coba lagi." }, 409);
+      }
+      return json({
+        ok: true,
+        queue_session: updateRes.data,
+        message: "Nama/tanggal Session MCU berhasil diperbarui. Session ID dan semua data operasional tetap.",
+      });
+    }
+
     if (
       action === "deactivate-location-session" ||
       action === "reactivate-location-session"

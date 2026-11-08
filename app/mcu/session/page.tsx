@@ -84,6 +84,10 @@ function McuSessionContent() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // MCU_CORPORATE_SESSION_METADATA_EDIT_V529
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [editingSessionName, setEditingSessionName] = useState("");
+  const [editingSessionDate, setEditingSessionDate] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -289,6 +293,81 @@ function McuSessionContent() {
       await load();
     } catch (err: any) {
       setError(err?.message || "Gagal mengubah status Session MCU.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // MCU_CORPORATE_SESSION_METADATA_EDIT_V529
+  function beginSessionEdit(row: QueueSession) {
+    if (saving) return;
+    setEditingSessionId(row.id);
+    setEditingSessionName(String(row.session_name || ""));
+    setEditingSessionDate(String(row.session_date || "").slice(0, 10));
+    setMessage("");
+    setError("");
+  }
+
+  function cancelSessionEdit() {
+    if (saving) return;
+    setEditingSessionId(null);
+    setEditingSessionName("");
+    setEditingSessionDate("");
+  }
+
+  async function saveSessionEdit() {
+    const current = queueSessions.find((row) => row.id === editingSessionId);
+    if (!current || saving) return;
+    const nextName = editingSessionName.trim();
+    const nextDate = editingSessionDate.trim();
+    if (!nextName) {
+      setError("Nama Session wajib diisi.");
+      return;
+    }
+    if (String(current.session_date || "") && !nextDate) {
+      setError("Tanggal yang sudah ada tidak boleh dikosongkan.");
+      return;
+    }
+    if (nextDate !== String(current.session_date || "").slice(0, 10)) {
+      if (!window.confirm("Ubah tanggal Session ini? Tanggal hanya dapat diubah jika Session belum memiliki peserta, registrasi, atau antrean. Session ID tidak akan berubah.")) {
+        return;
+      }
+    }
+
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const res = await fetch("/api/mcu/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "edit-location-session-metadata",
+          queue_session_id: current.id,
+          company_id: current.company_id,
+          package_id: current.package_id,
+          expected_session_name: current.session_name || "",
+          expected_session_date: current.session_date || "",
+          session_name: nextName,
+          session_date: nextDate,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal memperbarui Session MCU.");
+      }
+      const changed: QueueSession | null = json.queue_session || null;
+      if (changed) {
+        setQueueSessions((rows) => rows.map((row) => (
+          row.id === current.id ? { ...row, ...changed } : row
+        )));
+      }
+      setEditingSessionId(null);
+      setEditingSessionName("");
+      setEditingSessionDate("");
+      setMessage(json.message || "Session MCU berhasil diperbarui.");
+    } catch (err: any) {
+      setError(err?.message || "Gagal memperbarui Session MCU.");
     } finally {
       setSaving(false);
     }
@@ -545,13 +624,32 @@ function McuSessionContent() {
                     return (
                       <tr key={row.id} className="border-t">
                         <td className="p-3 font-bold">
-                          {dateLabel(row.session_date)}
+                          {editingSessionId === row.id ? (
+                            <input
+                              type="date"
+                              className="input min-w-[155px]"
+                              value={editingSessionDate}
+                              onChange={(e) => setEditingSessionDate(e.target.value)}
+                              disabled={saving}
+                              aria-label="Edit Tanggal MCU"
+                            />
+                          ) : dateLabel(row.session_date)}
                         </td>
                         <td className="p-3 font-black">
                           {row.location || "Legacy / belum diatur"}
                         </td>
                         <td className="p-3">
-                          {row.session_name || "-"}
+                          {editingSessionId === row.id ? (
+                            <input
+                              type="text"
+                              className="input min-w-[260px]"
+                              maxLength={160}
+                              value={editingSessionName}
+                              onChange={(e) => setEditingSessionName(e.target.value)}
+                              disabled={saving}
+                              aria-label="Edit Nama Session"
+                            />
+                          ) : (row.session_name || "-")}
                         </td>
                         <td className="p-3">{row.track_a_name || "Lab Darah"}</td>
                         <td className="p-3">{row.track_b_name || "Rontgen"}</td>
@@ -568,6 +666,35 @@ function McuSessionContent() {
                         </td>
                         <td className="p-3">
                           <div className="flex flex-wrap gap-2">
+                            {editingSessionId === row.id ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveSessionEdit()}
+                                  disabled={saving || !editingSessionName.trim()}
+                                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800"
+                                >
+                                  {saving ? "Menyimpan..." : "Simpan Edit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelSessionEdit}
+                                  disabled={saving}
+                                  className="rounded-lg border bg-white px-3 py-2 text-xs font-black text-slate-700"
+                                >
+                                  Batal
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => beginSessionEdit(row)}
+                                disabled={saving || editingSessionId !== null}
+                                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800"
+                              >
+                                Edit
+                              </button>
+                            )}
                             {active ? (
                               <a
                                 href={`/mcu/queue?session_id=${row.id}`}

@@ -151,6 +151,42 @@ export async function GET(req: NextRequest) {
   if (queueSession?.id) {
     const queueSessionId = Number(queueSession.id);
 
+    // MCU_CORPORATE_RETRIEVE_EXACT_SESSION_FULL_ROSTER_V530_3
+    // Corporate membership from ALL three exact-session operational links.
+    // Read in pages: a single select without range is capped by PostgREST.
+    // Never use another Session's/source's participants to fill this roster.
+    if (program === "corporate") {
+      const tablesV530 = [
+        "mcu_participant_session_assignments",
+        "mcu_registration_sessions",
+        "mcu_queue_entries",
+      ];
+      const perPageV530 = 400;
+      const memberGroupsV530 = await Promise.all(
+        tablesV530.map(async (tableV530) => {
+          const participantIdsV530: number[] = [];
+          for (let startV530 = 0; ; startV530 += perPageV530) {
+            const pageV530 = await supabase
+              .from(tableV530)
+              .select("participant_id")
+              .eq("queue_session_id", queueSessionId)
+              .order("participant_id", { ascending: true })
+              .range(startV530, startV530 + perPageV530 - 1);
+            if (pageV530.error) throw new Error(pageV530.error.message);
+            const rowsV530 = pageV530.data || [];
+            for (const rowV530 of rowsV530) {
+              const idV530 = Number(rowV530.participant_id || 0);
+              if (Number.isSafeInteger(idV530) && idV530 > 0) {
+                participantIdsV530.push(idV530);
+              }
+            }
+            if (rowsV530.length < perPageV530) break;
+          }
+          return participantIdsV530;
+        }),
+      );
+      sessionParticipantIds = Array.from(new Set(memberGroupsV530.flat()));
+    } else {
     const [assignmentResult, registrationResult, queueEntryResult] =
       await Promise.all([
         supabase
@@ -188,6 +224,8 @@ export async function GET(req: NextRequest) {
           .filter(Boolean),
       ),
     );
+    }
+
   }
 
   // V512: Database Existing + Session must refer to the same imported batch.
@@ -402,6 +440,81 @@ export async function GET(req: NextRequest) {
       mode: "other_session",
       queue_session: queueSession,
       company_id: companyIdV528,
+    });
+  }
+
+  // MCU_CORPORATE_RETRIEVE_EXACT_SESSION_FULL_ROSTER_V530_3
+  // Exact queue_session_id + company scoped roster. No 200-person limit.
+  // This path is deliberately AFTER the read-only V528 other-session mode.
+  // Existing V512 Database Existing/session compatibility guard is preserved.
+  if (program === "corporate" && Number(queueSession?.id || 0) > 0) {
+    const exactIdsV530 = Array.from(new Set(
+      (sessionParticipantIds || [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
+    ));
+    const rowsV530: any[] = [];
+    const batchV530 = 200;
+
+    for (let iV530 = 0; iV530 < exactIdsV530.length; iV530 += batchV530) {
+      const idsV530 = exactIdsV530.slice(iV530, iV530 + batchV530);
+      const resultV530 = await supabase
+        .from("participants")
+        .select(`${SELECT_COLUMNS},barcode_value`)
+        .eq("program_type", "corporate")
+        .eq("company_id", Number(queueSession.company_id))
+        .in("id", idsV530);
+      if (resultV530.error) return fail(resultV530.error.message, 500);
+      rowsV530.push(...(resultV530.data || []));
+    }
+
+    const uniqueV530 = Array.from(new Map<number, any>(
+      rowsV530.map((rowV530: any): [number, any] => [Number(rowV530.id), rowV530]),
+    ).values());
+
+    const exactFieldsV530 = ["mcu_id", "external_id", "nik", "employee_nik", "barcode_value"];
+    const fuzzyFieldsV530 = ["name", ...exactFieldsV530];
+    let matchedV530 = uniqueV530;
+    let modeV530 = "session";
+    if (keyword.length >= 2) {
+      const exactV530 = uniqueV530.filter((rowV530: any) =>
+        exactFieldsV530.some((fieldV530) => String(rowV530[fieldV530] ?? "") === keyword),
+      );
+      if (exactV530.length) {
+        matchedV530 = exactV530;
+        modeV530 = "exact";
+      } else {
+        const needleV530 = keyword.toLowerCase();
+        matchedV530 = uniqueV530.filter((rowV530: any) =>
+          fuzzyFieldsV530.some((fieldV530) =>
+            String(rowV530[fieldV530] ?? "").toLowerCase().includes(needleV530),
+          ),
+        );
+        modeV530 = "like";
+      }
+    }
+    matchedV530.sort((aV530: any, bV530: any) =>
+      String(aV530.name || "").localeCompare(String(bV530.name || ""), "id-ID") ||
+      Number(aV530.id || 0) - Number(bV530.id || 0),
+    );
+
+    const decoratedV530 = await decorateRows(supabase, matchedV530);
+    const withRegV530: any[] = [];
+    for (let iV530 = 0; iV530 < decoratedV530.length; iV530 += batchV530) {
+      const batchRowsV530 = decoratedV530.slice(iV530, iV530 + batchV530);
+      withRegV530.push(...(await decorateSessionRegistration(
+        supabase,
+        batchRowsV530,
+        Number(queueSession.id),
+      )));
+    }
+
+    return ok({
+      participants: withRegV530,
+      mode: modeV530,
+      queue_session: queueSession,
+      session_member_ids_v530: exactIdsV530.length,
+      returned_count_v530: withRegV530.length,
     });
   }
 

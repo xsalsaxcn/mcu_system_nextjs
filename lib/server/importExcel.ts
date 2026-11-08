@@ -405,6 +405,104 @@ async function loadExistingParticipantKeysAppendOnlyV214(
   return keys;
 }
 
+// MCU_CORPORATE_IMPORT_BULK_EXISTING_LOOKUP_V527_1
+type CorporateParticipantIndexV527 = {
+  byEmployeeId: Map<string, any[]>;
+  byName: Map<string, any[]>;
+  total: number;
+};
+
+function corporateEmployeeKeyV527(value: any) {
+  // Preserve V520 employee-id equality semantics: trim only, no fuzzy normalization.
+  return clean(value);
+}
+
+function corporateNameKeyV527(value: any) {
+  return clean(value).toLowerCase();
+}
+
+function pushCorporateIndexV527(
+  map: Map<string, any[]>,
+  key: string,
+  row: any,
+) {
+  if (!key) return;
+  const current = map.get(key) || [];
+  if (!current.some((item: any) => Number(item?.id || 0) === Number(row?.id || 0))) {
+    current.push(row);
+  }
+  map.set(key, current);
+}
+
+async function loadCorporateParticipantIndexV527(
+  supabase: any,
+  companyId: number,
+): Promise<CorporateParticipantIndexV527> {
+  const byEmployeeId = new Map<string, any[]>();
+  const byName = new Map<string, any[]>();
+  const pageSize = 1000;
+  let from = 0;
+  let total = 0;
+
+  while (true) {
+    const result = await supabase
+      .from("participants")
+      .select("id,name,external_id,employee_nik,company_id,program_type")
+      .eq("company_id", Number(companyId))
+      .eq("program_type", PROGRAM_CORPORATE)
+      .range(from, from + pageSize - 1);
+
+    if (result.error) throw result.error;
+    const rows = result.data || [];
+    total += rows.length;
+
+    for (const row of rows) {
+      for (const employeeId of Array.from(
+        new Set(
+          [clean(row?.external_id), clean(row?.employee_nik)].filter(Boolean),
+        ),
+      )) {
+        pushCorporateIndexV527(
+          byEmployeeId,
+          corporateEmployeeKeyV527(employeeId),
+          row,
+        );
+      }
+
+      pushCorporateIndexV527(
+        byName,
+        corporateNameKeyV527(row?.name),
+        row,
+      );
+    }
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return { byEmployeeId, byName, total };
+}
+
+function resolveCorporateExistingParticipantV527(
+  index: CorporateParticipantIndexV527,
+  employeeId: string,
+  participantName: string,
+) {
+  const employeeMatches = employeeId
+    ? index.byEmployeeId.get(corporateEmployeeKeyV527(employeeId)) || []
+    : [];
+  const matches = employeeMatches.length
+    ? employeeMatches
+    : index.byName.get(corporateNameKeyV527(participantName)) || [];
+
+  const uniqueMatches = new Map<number, any>();
+  for (const match of matches) {
+    const id = Number(match?.id || 0);
+    if (id) uniqueMatches.set(id, match);
+  }
+  return uniqueMatches;
+}
+
 
 async function getOrCreateCompany(
   supabase: any,
@@ -781,6 +879,10 @@ export async function importParticipantsFromExcel(
     corporate_session_date_v466: corporateSessionRowV466 ? corporateSessionDateV466(corporateSessionRowV466) : "",
     corporate_session_assignments_v466: 0,
     corporate_existing_reused_v520: 0,
+    corporate_existing_lookup_mode_v527: programType === PROGRAM_CORPORATE ? "bulk_preload" : null,
+    corporate_existing_index_rows_v527: 0,
+    corporate_existing_assignment_rows_v527: 0,
+    corporate_assignment_check_chunks_v527: 0,
     corporate_import_resolved_v520: 0,
     corporate_import_assigned_v520: 0,
     corporate_import_unassigned_v520: [] as number[],
@@ -798,6 +900,15 @@ export async function importParticipantsFromExcel(
   const counterByYear = new Map<string, number>();
   const seenImportParticipantKeysV168 = new Set<string>();
   const corporateResolvedParticipantIdsV520 = new Set<number>();
+  const corporateParticipantIndexV527 =
+    programType === PROGRAM_CORPORATE
+      ? await loadCorporateParticipantIndexV527(supabase, companyId)
+      : null;
+  if (corporateParticipantIndexV527) {
+    stats.corporate_existing_index_rows_v527 =
+      corporateParticipantIndexV527.total;
+  }
+  const corporateExistingAssignmentsV527 = new Map<string, any>();
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -1325,39 +1436,15 @@ export async function importParticipantsFromExcel(
           // only required write for re-import.
           if (programType === PROGRAM_CORPORATE) {
             const employeeIdV520 = clean(base.external_id);
-            const resolvedMatchesV520 = new Map<number, any>();
-
-            if (employeeIdV520) {
-              for (const fieldV520 of ["external_id", "employee_nik"]) {
-                const resultV520 = await supabase
-                  .from("participants")
-                  .select("id,name,external_id,employee_nik,company_id")
-                  .eq("company_id", companyId)
-                  .eq(fieldV520, employeeIdV520)
-                  .limit(3);
-                if (resultV520.error) throw resultV520.error;
-                for (const matchV520 of resultV520.data || []) {
-                  const idV520 = Number(matchV520.id || 0);
-                  if (idV520) resolvedMatchesV520.set(idV520, matchV520);
-                }
-              }
+            if (!corporateParticipantIndexV527) {
+              throw new Error("Index peserta Corporate V527 tidak tersedia.");
             }
 
-            // Fallback only when there is no employee ID match. It must be unique
-            // inside the selected company; otherwise stop rather than bind wrong person.
-            if (!resolvedMatchesV520.size) {
-              const byNameV520 = await supabase
-                .from("participants")
-                .select("id,name,external_id,employee_nik,company_id")
-                .eq("company_id", companyId)
-                .ilike("name", candidate.name)
-                .limit(3);
-              if (byNameV520.error) throw byNameV520.error;
-              for (const matchV520 of byNameV520.data || []) {
-                const idV520 = Number(matchV520.id || 0);
-                if (idV520) resolvedMatchesV520.set(idV520, matchV520);
-              }
-            }
+            const resolvedMatchesV520 = resolveCorporateExistingParticipantV527(
+              corporateParticipantIndexV527,
+              employeeIdV520,
+              candidate.name,
+            );
 
             if (resolvedMatchesV520.size !== 1) {
               throw new Error(
@@ -1370,32 +1457,29 @@ export async function importParticipantsFromExcel(
             const participantIdV520 = Array.from(resolvedMatchesV520.keys())[0];
 
             if (corporateSessionRowV466?.id) {
-              const assignmentV520 = await supabase
-                .from("mcu_participant_session_assignments")
-                .upsert(
-                  {
-                    participant_id: participantIdV520,
-                    queue_session_id: Number(corporateSessionRowV466.id),
-                    source_id: sourceId,
-                    location_name:
-                      base.mapped_location ||
-                      corporateSessionLocationV466(corporateSessionRowV466) ||
-                      null,
-                    session_date:
-                      corporateSessionDateV466(corporateSessionRowV466) || null,
-                    department: base.department || null,
-                    position: base.position || null,
-                    raw_json: {
-                      ...(base.raw_json_v466 || {}),
-                      import_version: "V520",
-                      employee_nik: employeeIdV520 || null,
-                    },
-                    updated_at: new Date().toISOString(),
+              const queueSessionIdV527 = Number(corporateSessionRowV466.id);
+              corporateExistingAssignmentsV527.set(
+                `${participantIdV520}|${queueSessionIdV527}`,
+                {
+                  participant_id: participantIdV520,
+                  queue_session_id: queueSessionIdV527,
+                  source_id: sourceId,
+                  location_name:
+                    base.mapped_location ||
+                    corporateSessionLocationV466(corporateSessionRowV466) ||
+                    null,
+                  session_date:
+                    corporateSessionDateV466(corporateSessionRowV466) || null,
+                  department: base.department || null,
+                  position: base.position || null,
+                  raw_json: {
+                    ...(base.raw_json_v466 || {}),
+                    import_version: "V527.1",
+                    employee_nik: employeeIdV520 || null,
                   },
-                  { onConflict: "participant_id,queue_session_id" },
-                );
-              if (assignmentV520.error) throw assignmentV520.error;
-              stats.corporate_session_assignments_v466 += 1;
+                  updated_at: new Date().toISOString(),
+                },
+              );
             }
 
             corporateResolvedParticipantIdsV520.add(participantIdV520);
@@ -1562,6 +1646,41 @@ export async function importParticipantsFromExcel(
             : null,
         });
       }
+    }
+  }
+
+  // MCU_CORPORATE_IMPORT_BULK_EXISTING_LOOKUP_V527_1
+  // Existing participants are resolved in-memory above, then exact Session
+  // assignments are written in bulk instead of one Supabase request per row.
+  if (
+    programType === PROGRAM_CORPORATE &&
+    corporateSessionRowV466?.id &&
+    corporateExistingAssignmentsV527.size
+  ) {
+    const existingAssignmentRowsV527 = Array.from(
+      corporateExistingAssignmentsV527.values(),
+    );
+    stats.corporate_existing_assignment_rows_v527 =
+      existingAssignmentRowsV527.length;
+
+    const existingAssignmentChunkSizeV527 = 500;
+    for (
+      let iV527 = 0;
+      iV527 < existingAssignmentRowsV527.length;
+      iV527 += existingAssignmentChunkSizeV527
+    ) {
+      const assignmentChunkV527 = existingAssignmentRowsV527.slice(
+        iV527,
+        iV527 + existingAssignmentChunkSizeV527,
+      );
+      const assignmentResultV527 = await supabase
+        .from("mcu_participant_session_assignments")
+        .upsert(assignmentChunkV527, {
+          onConflict: "participant_id,queue_session_id",
+        });
+      if (assignmentResultV527.error) throw assignmentResultV527.error;
+      stats.corporate_session_assignments_v466 +=
+        assignmentChunkV527.length;
     }
   }
 
@@ -1758,19 +1877,35 @@ export async function importParticipantsFromExcel(
     stats.corporate_import_resolved_v520 = resolvedIdsV520.length;
 
     if (resolvedIdsV520.length) {
-      const assignmentCheckV520 = await supabase
-        .from("mcu_participant_session_assignments")
-        .select("participant_id")
-        .eq("queue_session_id", Number(corporateSessionRowV466.id))
-        .in("participant_id", resolvedIdsV520);
+      // V527.1: chunk the final verification too, avoiding an oversized .in()
+      // query when Corporate imports contain hundreds/thousands of participants.
+      const assignedIdsV520 = new Set<number>();
+      const assignmentCheckChunkSizeV527 = 400;
+      for (
+        let iV527 = 0;
+        iV527 < resolvedIdsV520.length;
+        iV527 += assignmentCheckChunkSizeV527
+      ) {
+        const participantIdsV527 = resolvedIdsV520.slice(
+          iV527,
+          iV527 + assignmentCheckChunkSizeV527,
+        );
+        const assignmentCheckV520 = await supabase
+          .from("mcu_participant_session_assignments")
+          .select("participant_id")
+          .eq("queue_session_id", Number(corporateSessionRowV466.id))
+          .in("participant_id", participantIdsV527);
 
-      if (assignmentCheckV520.error) throw assignmentCheckV520.error;
+        if (assignmentCheckV520.error) throw assignmentCheckV520.error;
+        stats.corporate_assignment_check_chunks_v527 += 1;
 
-      const assignedIdsV520 = new Set<number>(
-        (assignmentCheckV520.data || [])
-          .map((row: any) => Number(row.participant_id || 0))
-          .filter((value: number) => Number.isFinite(value) && value > 0),
-      );
+        for (const rowV527 of assignmentCheckV520.data || []) {
+          const participantIdV527 = Number(rowV527.participant_id || 0);
+          if (Number.isFinite(participantIdV527) && participantIdV527 > 0) {
+            assignedIdsV520.add(participantIdV527);
+          }
+        }
+      }
 
       const unassignedV520 = resolvedIdsV520.filter(
         (participantIdV520) => !assignedIdsV520.has(participantIdV520),
