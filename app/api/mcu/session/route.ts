@@ -389,28 +389,41 @@ export async function POST(req: NextRequest) {
           return json({ ok: false, message: "Sudah ada Session lain dengan perusahaan, paket, lokasi, dan tanggal tersebut." }, 409);
         }
 
-        // Dates are duplicated into some operational records. A date change
-        // must be rejected after an assignment, registration or queue exists;
-        // those records must never be silently desynchronized or mutated.
-        const checks = await Promise.all([
-          supabase.from("mcu_participant_session_assignments")
-            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
-          supabase.from("mcu_registration_sessions")
-            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
-          supabase.from("mcu_queue_entries")
-            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
-          supabase.from("mcu_queue_informed")
-            .select("participant_id").eq("queue_session_id", queueSessionId).limit(1),
-        ]);
-        for (const check of checks) {
-          if (check.error) throw new Error(queueSchemaErrorMessage(check.error));
-        }
-        if (checks.some((check) => (check.data || []).length > 0)) {
+        // MCU_CORPORATE_SESSION_DATE_SYNC_V531
+        // The reset-testing flow intentionally preserves imported roster assignments.
+        // A date change is allowed with roster ONLY, but must atomically update
+        // the master Session and its assignment date snapshots in PostgreSQL.
+        // Registration, queue and informed rows must all be empty. The DB RPC
+        // uses a row lock and a single transaction; no two-step JS updates.
+        const dateUpdate = await supabase.rpc("mcu_corporate_edit_session_date_v531", {
+          p_queue_session_id: queueSessionId,
+          p_company_id: companyId,
+          p_package_id: packageId,
+          p_expected_session_name: oldName,
+          p_expected_session_date: oldDate || null,
+          p_next_session_name: nextName,
+          p_next_session_date: nextDate,
+        });
+        if (dateUpdate.error) {
+          const missingRpc = dateUpdate.error.code === "PGRST202" ||
+            /Could not find the function/i.test(dateUpdate.error.message || "");
           return json({
             ok: false,
-            message: "Tanggal tidak dapat diubah: Session sudah memiliki peserta/registrasi/antrean/informed. Nama Session masih dapat diedit tanpa mengubah data operasional.",
-          }, 409);
+            message: missingRpc
+              ? "Fungsi transaksi MCU V531 belum dipasang di Supabase. Tanggal tidak diubah."
+              : `Gagal mengubah tanggal Session: ${dateUpdate.error.message || "validasi transaksi gagal"}`,
+          }, missingRpc ? 503 : 409);
         }
+        const editResult = dateUpdate.data as any;
+        if (!editResult?.ok || !editResult?.queue_session) {
+          return json({ ok: false, message: "Hasil transaksi V531 tidak valid. Refresh dan audit Session terlebih dahulu." }, 500);
+        }
+        return json({
+          ok: true,
+          queue_session: editResult.queue_session,
+          assignments_updated: Number(editResult.assignments_updated || 0),
+          message: `Tanggal Session dan ${Number(editResult.assignments_updated || 0)} assignment peserta berhasil diperbarui secara konsisten. Session ID tidak berubah.`,
+        });
       }
 
       if (nextName === oldName && (nextDate || "") === oldDate) {

@@ -329,7 +329,7 @@ function McuSessionContent() {
       return;
     }
     if (nextDate !== String(current.session_date || "").slice(0, 10)) {
-      if (!window.confirm("Ubah tanggal Session ini? Tanggal hanya dapat diubah jika Session belum memiliki peserta, registrasi, atau antrean. Session ID tidak akan berubah.")) {
+      if (!window.confirm("Ubah tanggal Session ini? Roster peserta tetap aman dan tanggal assignment ikut disinkronkan. Perubahan ditolak jika masih ada registrasi, antrean, atau informed. Session ID tidak berubah.")) {
         return;
       }
     }
