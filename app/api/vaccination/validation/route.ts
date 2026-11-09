@@ -552,9 +552,20 @@ export async function GET(req: NextRequest) {
       return statuses.some((status) => ["CANCELLED", "CANCELED"].includes(status));
     });
 
+    // V619 REPORT-ONLY: a moved Bazar registration can remain DONE while its
+    // vaccine item remains WAITING (paid at the event, injection at clinic).
+    // It is not in the CANCELLED bucket. Read the explicit movement note from
+    // all source registrations; never infer movement from DONE or payment alone.
+    const movedNoteSource = (cancelledResult.data || []).filter((row: any) =>
+      /pindah\s+lokasi\s+layanan\s+dari\s+.+\s+ke\s+.+/i.test(clean(row.status_note || row.cancelled_note))
+    );
     const cancelledIds = cancelledSource.map((row: any) => Number(row.id)).filter(Boolean);
-    const cancelledRecordsByRegistration = await loadRecordsForRegistrations(supabase, cancelledIds);
-    const cancelledItemsByRegistration = await loadItemsForRegistrations(supabase, cancelledIds);
+    const historyIds = Array.from(new Set([
+      ...cancelledIds,
+      ...movedNoteSource.map((row: any) => Number(row.id)).filter(Boolean),
+    ]));
+    const cancelledRecordsByRegistration = await loadRecordsForRegistrations(supabase, historyIds);
+    const cancelledItemsByRegistration = await loadItemsForRegistrations(supabase, historyIds);
     const cancelledRows: any[] = [];
 
     for (const row of cancelledSource) {
@@ -593,9 +604,46 @@ export async function GET(req: NextRequest) {
     const movedRows = cancelledRows.filter((row: any) => /pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
     const plainCancelledRows = cancelledRows.filter((row: any) => !/pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
 
+    // V619: A genuine move-to-clinic can be DONE at registration/queue level,
+    // but WAITING at the vaccine-item level. Include it in moved history for
+    // its *own* service; do not mislabel an already-administered other service.
+    const movedKeys = new Set(movedRows.map((row: any) => clean(row.row_key)));
+    for (const registration of movedNoteSource) {
+      const id = Number(registration.id);
+      const itemRows = cancelledItemsByRegistration.get(id) || [];
+      const pendingServices = Array.from(new Set<"HEALTHDAY" | "BAZAR">(
+        itemRows
+          .filter((item: any) => !["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase()))
+          .map((item: any) => normalizeServiceMode(item.service_mode))
+      ));
+      // No unfinished item = do not reinterpret an administered vaccine as moved.
+      if (!pendingServices.length) continue;
+      const declaredMode = clean(registration.patient_service_status).toUpperCase();
+      const serviceMode = pendingServices.length === 1
+        ? pendingServices[0]
+        : pendingServices.find((mode) => mode === declaredMode);
+      // Ambiguous dual-service note must not be assigned to the wrong service.
+      if (!serviceMode) continue;
+      const recordRows = cancelledRecordsByRegistration.get(id) || [];
+      const flags = queueFlags(registration);
+      const displayed = flags.healthdayQueueEnabled && flags.bazarQueueEnabled
+        ? displayLegacy(registration, recordRows, itemRows)
+        : displayForService(registration, serviceMode, recordRows, itemRows);
+      // Legacy display chooses mode by patient_service_status. If it differs
+      // from the unfinished service, create the explicit correct service view.
+      const movedDisplay = displayed.validation_service_mode === serviceMode
+        ? displayed
+        : displayForService(registration, serviceMode, recordRows, itemRows);
+      const key = clean(movedDisplay.row_key);
+      if (movedKeys.has(key)) continue;
+      movedDisplay.validation_status = "MOVED"; // response only; no DB update
+      movedRows.push(movedDisplay);
+      movedKeys.add(key);
+    }
+
     return json({
       ok: true,
-      rows,
+      rows: rows.filter((row: any) => !movedKeys.has(clean(row.row_key))),
       moved_rows: movedRows,
       cancelled_rows: plainCancelledRows,
       session_locations: sessionLocations,
