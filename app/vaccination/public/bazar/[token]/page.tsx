@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { bazarProductDisplay } from "@/lib/vaccination/bazarProductDisplay";
 
 type SessionInfo = {
   id: number;
@@ -121,11 +122,12 @@ export default function BazarPublicRegistrationPage() {
   const visibleProducts = useMemo(() => {
     const q = search.toLowerCase().trim();
     return products.filter((product) => {
-      const haystack = `${product.vaccineName} ${product.brand} ${product.lotNumber}`.toLowerCase();
+      const friendly = bazarProductDisplay(product.vaccineName);
+      const haystack = `${product.vaccineName} ${product.brand} ${product.lotNumber} ${friendly.title} ${friendly.subtitle} ${friendly.keywords}`.toLowerCase();
       if (q && !haystack.includes(q)) return false;
       const hasPackage = product.salesOptions.some((offer) => offer.saleMode === "PACKAGE");
       const hasNonPackage = product.salesOptions.some((offer) => offer.saleMode === "NON_PACKAGE");
-      const isVitamin = /vitamin|multivitamin|injeksi/i.test(`${product.vaccineName} ${product.brand}`);
+      const isVitamin = friendly.category === "VITAMIN";
       if (productFilter === "VITAMIN" && !isVitamin) return false;
       if (productFilter === "VAKSIN" && isVitamin) return false;
       if (productFilter === "PACKAGE" && !hasPackage) return false;
@@ -316,18 +318,22 @@ export default function BazarPublicRegistrationPage() {
                 </div>
               </div>
 
+              <p className="mt-3 text-xs font-semibold text-slate-500">Nama yang mudah dipahami ditampilkan di atas nama produk resmi. Pemilihan jenis vaksin, kelayakan, dan jadwal dosis tetap dikonfirmasi oleh tenaga kesehatan.</p>
               <div className="mt-4 max-h-[470px] space-y-3 overflow-y-auto pr-1">
                 {visibleProducts.map((product) => {
                   const key = `${product.vaccineId}:${product.lotId}`;
                   const checked = Boolean(selected[key]);
                   const mode = selected[key] || (product.salesOptions.some((offer) => offer.saleMode === "NON_PACKAGE") ? "NON_PACKAGE" : "PACKAGE");
                   const offer = product.salesOptions.find((item) => item.saleMode === mode) || product.salesOptions[0];
+                  const friendly = bazarProductDisplay(product.vaccineName);
                   return (
                     <div key={key} className={`rounded-2xl border p-4 transition ${checked ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
                       <div className="flex items-start gap-3">
                         <button type="button" onClick={() => toggleProduct(product)} className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border text-xs font-black ${checked ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300 bg-white text-transparent"}`}>✓</button>
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-black text-slate-900">{product.vaccineName}{product.brand ? ` · ${product.brand}` : ""}</div>
+                          <div className="text-sm font-black text-emerald-900">{friendly.title}</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-600">{friendly.subtitle}</div>
+                          <div className="mt-2 text-[11px] font-bold text-slate-500">Produk: {product.vaccineName}{product.brand ? ` · ${product.brand}` : ""}</div>
                           <div className="mt-1 text-xs font-semibold text-slate-500">Lot {product.lotNumber}{product.stockRemaining != null ? ` · Sisa ${product.stockRemaining}` : ""}</div>
                           {checked && product.salesOptions.length > 1 ? (
                             <select value={mode} onChange={(e) => setSelected((prev) => ({ ...prev, [key]: e.target.value as "PACKAGE" | "NON_PACKAGE" }))} className="mt-3 rounded-xl border bg-white px-3 py-2 text-xs font-black">

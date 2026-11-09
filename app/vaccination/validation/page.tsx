@@ -26,6 +26,10 @@ type ProductDetail = {
   sale_mode?: string;
   package_dose_count?: number;
   sales_price_snapshot?: number | null;
+  price?: number | null;
+  payment_surcharge_percent?: number | null;
+  payment_surcharge_amount?: number | null;
+  payment_total?: number | null;
   payment_method?: string;
   payment_note?: string;
 };
@@ -120,23 +124,87 @@ function csvCell(value: any) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+// V618 payment reporting uses original item snapshots, NEVER current master prices.
+function snapshotNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function exportMoney(value: number | null) {
+  return value === null ? "" : String(Math.round(value * 100) / 100);
+}
+
+function moveInfo(row: Row) {
+  const rawNote = clean(row.raw?.status_note);
+  const note = /pindah\s+lokasi\s+layanan/i.test(rawNote) ? rawNote : clean(row.note);
+  const matched = note.match(/pindah\s+lokasi\s+layanan\s+dari\s+(.+?)\s+ke\s+(.+?)(?:\s*[·-]\s*registrasi\s+baru\s*#(\d+))?$/i);
+  return {
+    moved: Boolean(matched || /pindah\s+lokasi\s+layanan/i.test(note)),
+    source: matched?.[1] || "",
+    target: matched?.[2] || "",
+    targetRegistration: matched?.[3] || "",
+    note,
+  };
+}
+
+function paymentSnapshot(row: Row) {
+  if (clean(row.validation_service_mode).toUpperCase() !== "BAZAR") {
+    return { base: null, charge: null, total: null, rate: null, evidence: "Bukan transaksi Bazar", source: "" };
+  }
+  const items = (row.products || []).filter((item) => clean(item.service_mode).toUpperCase() === "BAZAR");
+  const sum = (accessor: (item: ProductDetail) => number | null): number | null => {
+    if (!items.length) return null;
+    let sumValue = 0;
+    for (const item of items) {
+      const amount = accessor(item);
+      if (amount === null) return null; // missing snapshot must NOT become Rp0
+      sumValue += amount;
+    }
+    return Math.round(sumValue * 100) / 100;
+  };
+  const base = sum((item) => snapshotNumber(item.price));
+  const charge = sum((item) => snapshotNumber(item.payment_surcharge_amount));
+  const total = sum((item) => snapshotNumber(item.payment_total));
+  const creditItems = items.filter((item) => clean(item.payment_method || row.payment_method).toUpperCase() === "CREDIT_CARD");
+  const rate = creditItems.length ? snapshotNumber(creditItems[0]?.payment_surcharge_percent) : 0;
+  const note = items.map((item) => clean(item.payment_note)).join(" ") + " " + clean(row.raw?.payment_note);
+  const evidence = /pembayaran\s+tervalidasi/i.test(note)
+    ? "TERVALIDASI (CATATAN SISTEM)"
+    : clean(row.payment_method || items[0]?.payment_method) ? "METODE TERCATAT - PERLU VERIFIKASI" : "BELUM ADA METODE";
+  return { base, charge, total, rate, evidence, source: !items.length ? "SNAPSHOT ITEM TIDAK TERSEDIA" : base === null || charge === null || total === null ? "SNAPSHOT ITEM TIDAK LENGKAP" : "SNAPSHOT ITEM" };
+}
+
 function exportValidationRows(rows: Row[], label: string) {
   if (!rows.length) return false;
   const header = [
     "Status", "No. Antrean Vendor", "Nama Peserta", "NIK Karyawan / BINUSIAN ID",
     "Perusahaan", "Session", "Lokasi", "Tanggal Session", "Layanan", "Produk / Lot",
     "Payment Method", "Petugas Validasi", "Waktu Selesai", "Catatan",
+    "Harga Dasar (Rp)", "Charge CC (Rp)", "Charge CC (%)", "Total Pembayaran (Rp)",
+    "Status Pembayaran", "Sumber Nominal", "Lokasi Asal", "Lokasi Tujuan", "ID Registrasi Tujuan",
+    "Perhitungan Nominal", "ID Registrasi", "Kunci Layanan",
   ];
   const body = rows.map((row) => {
     const products = (row.products || [])
       .map((item) => `${clean(item.vaccine_name) || "Vaksin"} / Lot ${clean(item.lot_number) || "-"}`)
       .join(" | ");
+    const moved = moveInfo(row);
+    const money = paymentSnapshot(row);
+    const isMovedSource = moved.moved && Boolean(moved.targetRegistration);
+    const costFlag = money.total === null ? "NOMINAL TIDAK TERSEDIA / BUKAN BAZAR"
+      : isMovedSource ? "JANGAN JUMLAHKAN - PINDAH KE REGISTRASI TUJUAN"
+      : moved.moved ? "PINDAH KE KLINIK - CEK PEMBAYARAN"
+      : "SATU BARIS TRANSAKSI; CEK STATUS PEMBAYARAN";
     return [
-      clean(row.validation_status || row.queue_status || "PENDING"),
+      moved.moved ? "PINDAH LOKASI" : clean(row.validation_status || row.queue_status || "PENDING"),
       clean(row.queue_number), clean(row.patient_name), clean(row.employee_id),
       clean(row.company_name), clean(row.session_name), clean(row.location), dateKey(row.session_date),
       clean(row.validation_service_mode), products || clean(row.product_name), clean(row.payment_method),
       clean(row.validated_by), fmtDate(row.validated_at), clean(row.note),
+      exportMoney(money.base), exportMoney(money.charge), money.rate === null ? "" : exportMoney(money.rate), exportMoney(money.total),
+      money.evidence, money.source, moved.source, moved.target, moved.targetRegistration,
+      costFlag, String(row.id), rowStateKey(row),
     ].map(csvCell).join(",");
   });
   const csv = `\uFEFF${[header.map(csvCell).join(","), ...body].join("\r\n")}`;
@@ -284,10 +352,10 @@ export default function VaccinationValidationPage() {
     ).sort((a, b) => a.localeCompare(b));
   }, [rows, sessionLocations]);
 
-  const shown = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const keyword = filter.toLowerCase().trim();
 
-    return rows.filter((row) => {
+    const matches = (row: Row) => {
       const productText = (row.products || [])
         .map((item) => [item.vaccine_name, item.lot_number, item.dose_number, item.administered_by].filter(Boolean).join(" "))
         .join(" ");
@@ -318,8 +386,21 @@ export default function VaccinationValidationPage() {
       const searchOk = !keyword || haystack.includes(keyword);
 
       return companyOk && sessionOk && locationOk && serviceOk && fromOk && toOk && searchOk;
-    });
-  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, serviceFilter, sessionFilter]);
+    };
+    return {
+      shown: rows.filter(matches),
+      moved: movedHistoryRows.filter(matches),
+      cancelled: cancelledHistoryRows.filter(matches),
+    };
+  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, movedHistoryRows, cancelledHistoryRows, serviceFilter, sessionFilter]);
+  const shown = filteredGroups.shown;
+  const movedShown = filteredGroups.moved;
+  const cancelledShown = filteredGroups.cancelled;
+  const allValidationShown = useMemo(() => {
+    const unique = new Map<string, Row>();
+    for (const row of [...shown, ...movedShown, ...cancelledShown]) unique.set(rowStateKey(row), row);
+    return Array.from(unique.values());
+  }, [shown, movedShown, cancelledShown]);
 
   const pendingShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() !== "DONE"), [shown]);
   const doneShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() === "DONE"), [shown]);
@@ -713,7 +794,7 @@ export default function VaccinationValidationPage() {
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Tanggal akhir" />
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={loadRows} className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
-            <button type="button" onClick={() => runExport(shown, "filter")} className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">Export Filter</button>
+            <button type="button" onClick={() => runExport(allValidationShown, "semua-validasi")} className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">Export Semua Validasi</button>
           </div>
         </div>
 
@@ -863,13 +944,13 @@ export default function VaccinationValidationPage() {
               <span className="text-lg font-black text-blue-700">{movedOpen ? "▾" : "▸"}</span>
               <span><span className="block font-black text-slate-900">Peserta Pindah Lokasi</span><span className="mt-1 block text-xs font-semibold text-slate-500">{movedOpen ? "Klik untuk menutup riwayat pindah lokasi." : "Klik untuk melihat peserta yang dipindahkan ke Session/lokasi lain atau Klinik."}</span></span>
             </button>
-            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-blue-700">{movedHistoryRows.length} peserta</div>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-blue-700">{movedShown.length} peserta</div>
           </div>
           {movedOpen ? <div className="overflow-x-auto border-t">
             <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Peserta</th><th className="px-4 py-3">NIK / BINUSIAN ID</th><th className="px-4 py-3">Layanan / Produk</th><th className="px-4 py-3">Lokasi Asal</th><th className="px-4 py-3">Riwayat Pindah</th><th className="px-4 py-3">Aksi</th></tr></thead>
               <tbody className="divide-y">
-                {movedHistoryRows.map((row) => <tr key={`moved-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
+                {movedShown.map((row) => <tr key={`moved-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
                   <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
                   <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                   <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`moved-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
@@ -877,7 +958,7 @@ export default function VaccinationValidationPage() {
                   <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">{row.note || "Riwayat pindah lokasi"}</div></td>
                   <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
                 </tr>)}
-                {!movedHistoryRows.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta pindah lokasi pada Session/filter ini.</td></tr> : null}
+                {!movedShown.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta pindah lokasi pada Session/filter ini.</td></tr> : null}
               </tbody>
             </table>
           </div> : null}
@@ -889,13 +970,13 @@ export default function VaccinationValidationPage() {
               <span className="text-lg font-black text-rose-700">{cancelledOpen ? "▾" : "▸"}</span>
               <span><span className="block font-black text-slate-900">Peserta Cancel</span><span className="mt-1 block text-xs font-semibold text-slate-500">{cancelledOpen ? "Klik untuk menutup riwayat cancel." : "Klik untuk melihat peserta yang dibatalkan beserta alasannya."}</span></span>
             </button>
-            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-rose-700">{cancelledHistoryRows.length} peserta</div>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-rose-700">{cancelledShown.length} peserta</div>
           </div>
           {cancelledOpen ? <div className="overflow-x-auto border-t">
             <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Peserta</th><th className="px-4 py-3">NIK / BINUSIAN ID</th><th className="px-4 py-3">Layanan / Produk</th><th className="px-4 py-3">Payment</th><th className="px-4 py-3">Alasan Cancel</th><th className="px-4 py-3">Aksi</th></tr></thead>
               <tbody className="divide-y">
-                {cancelledHistoryRows.map((row) => <tr key={`cancel-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
+                {cancelledShown.map((row) => <tr key={`cancel-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
                   <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
                   <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                   <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`cancel-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
@@ -903,7 +984,7 @@ export default function VaccinationValidationPage() {
                   <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">{row.note || "-"}</div></td>
                   <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
                 </tr>)}
-                {!cancelledHistoryRows.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta Cancel pada Session/filter ini.</td></tr> : null}
+                {!cancelledShown.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta Cancel pada Session/filter ini.</td></tr> : null}
               </tbody>
             </table>
           </div> : null}

@@ -73,6 +73,10 @@ function itemDetail(item: any) {
     sale_mode: clean(item?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
     package_dose_count: Math.max(1, Number(item?.package_dose_count || 1)),
     sales_price_snapshot: item?.sales_price_snapshot ?? null,
+    price: item?.price ?? null,
+    payment_surcharge_percent: item?.payment_surcharge_percent ?? null,
+    payment_surcharge_amount: item?.payment_surcharge_amount ?? null,
+    payment_total: item?.payment_total ?? null,
     payment_method: clean(item?.payment_method),
     payment_note: clean(item?.payment_note),
   };
@@ -158,7 +162,9 @@ function displayForService(
     doctor_name: row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
     product_name: productName,
     lot_number: products.length === 1 ? products[0].lot_number : "",
-    note: row.cancelled_note || row.status_note || row.note || row.notes || row.payment_note || row.product_note || row.keterangan || "",
+    note: /pindah\s+lokasi\s+layanan/i.test(clean(row.status_note))
+      ? clean(row.status_note)
+      : (row.cancelled_note || row.status_note || row.note || row.notes || row.payment_note || row.product_note || row.keterangan || ""),
     print_status: row.print_status || "NOT_PRINTED",
     validation_status: done ? "DONE" : (isPendingTrackStatus(trackStatus) ? "PENDING" : trackStatus || "PENDING"),
     validated_at: serviceAdministeredAt || (done ? row.validated_at : null) || null,
@@ -340,7 +346,7 @@ async function loadItemsForRegistrations(supabase: any, registrationIds: number[
 
   const result = await supabase
     .from("vaccination_registration_items")
-    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,active,sale_mode,package_dose_count,sales_price_snapshot,payment_method,payment_note,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,active,sale_mode,package_dose_count,sales_price_snapshot,price,payment_method,payment_note,payment_surcharge_percent,payment_surcharge_amount,payment_total,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
     .in("registration_id", registrationIds)
     .eq("active", true)
     .order("id", { ascending: true });
