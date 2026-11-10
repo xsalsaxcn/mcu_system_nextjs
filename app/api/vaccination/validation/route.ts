@@ -468,6 +468,63 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, message: error?.message || "Gagal membaca detail layanan vaksin.", rows: [] }, 500);
     }
 
+    // V621 READ-ONLY: Session 179 may contain verified-paid Bazar bookings with
+    // an internal Bazar queue still WAITING. These records are NOT eligible to be
+    // marked DONE, and have not been explicitly moved to the clinic. They need
+    // a separate move-only entry point, not a vaccination completion shortcut.
+    // The original validation query and clinical workflow remain unchanged.
+    const moveCandidateRows: any[] = [];
+    if (Number(sessionId) === 179) {
+      const candidateResult = await supabase
+        .from("vaccination_registrations")
+        .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,existing_flow_config)")
+        .eq("session_id", 179)
+        .eq("bazar_queue_status", "WAITING")
+        .order("id", { ascending: false })
+        .limit(500);
+      if (candidateResult.error) {
+        return json({ ok: false, message: candidateResult.error.message || "Gagal membaca antrean Bazar yang belum masuk Validasi.", rows: [] }, 500);
+      }
+      const candidateRegistrations = candidateResult.data || [];
+      const candidateIds = candidateRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
+      let candidateItems: Map<number, any[]>;
+      try {
+        candidateItems = await loadItemsForRegistrations(supabase, candidateIds);
+      } catch (error: any) {
+        return json({ ok: false, message: error?.message || "Gagal membaca item Bazar belum disuntik.", rows: [] }, 500);
+      }
+      for (const candidate of candidateRegistrations) {
+        const validationState = clean(candidate.validation_status).toUpperCase();
+        if (validationState && validationState !== "REGISTERED") continue;
+        if (clean(candidate.patient_service_status).toUpperCase() !== "BAZAR") continue;
+        if (!clean(candidate.bazar_queue_number)) continue;
+        // A moved registration belongs in moved_rows, not this action queue.
+        if (/pindah\s+lokasi\s+layanan/i.test(clean(candidate.status_note) + " " + clean(candidate.cancelled_note))) continue;
+        const items = candidateItems.get(Number(candidate.id)) || [];
+        const bazarItems = items.filter((item: any) => item.active !== false && normalizeServiceMode(item.service_mode) === "BAZAR");
+        if (!bazarItems.length || items.some((item: any) => item.active !== false && normalizeServiceMode(item.service_mode) !== "BAZAR")) continue;
+        if (!bazarItems.every((item: any) =>
+          clean(item.status).toUpperCase() === "WAITING" &&
+          !Number(item.administered_record_id || 0) && !item.administered_at
+        )) continue;
+        // A payment method alone never proves payment. Only explicit verified
+        // payment evidence authorizes showing this guarded operational action.
+        const paymentEvidence = [candidate.payment_note, ...bazarItems.map((item: any) => item.payment_note)]
+          .map((value) => clean(value)).join(" ");
+        if (!/pembayaran\s+tervalidasi/i.test(paymentEvidence)) continue;
+        // V621.1: include the new flag in the inferred object type at construction.
+        const displayed = {
+          ...displayForService(candidate, "BAZAR", [], bazarItems),
+          move_only: true,
+        };
+        displayed.validation_status = "MENUNGGU_KEPUTUSAN_PINDAH";
+        displayed.note = "Pembayaran Bazar tervalidasi. Vaksin belum disuntik dan belum tercatat pindah lokasi.";
+        displayed.validated_at = null;
+        displayed.validated_by = "";
+        moveCandidateRows.push(displayed);
+      }
+    }
+
     const rows: any[] = [];
     for (const row of validationRegistrations) {
       const recordRows = recordsByRegistration.get(Number(row.id)) || [];
@@ -676,6 +733,12 @@ export async function GET(req: NextRequest) {
         !movedServiceKeys.has(`${Number(row.id)}:${clean(row.validation_service_mode).toUpperCase()}`)
       ),
       moved_rows: movedRows,
+      // Move-only candidates are deliberately separate from validation rows;
+      // their WAITING items cannot be marked DONE or bulk-cancelled from this UI.
+      move_candidates: moveCandidateRows.filter((row: any) =>
+        !movedServiceKeys.has(`${Number(row.id)}:BAZAR`) &&
+        !rows.some((current: any) => `${Number(current.id)}:${clean(current.validation_service_mode).toUpperCase()}` === `${Number(row.id)}:BAZAR`)
+      ),
       cancelled_rows: plainCancelledRows,
       session_locations: sessionLocations,
       sessions: sessionLocations,

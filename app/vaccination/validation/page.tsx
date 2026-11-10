@@ -59,6 +59,7 @@ type Row = {
   session_name?: string;
   products?: ProductDetail[];
   record_ids?: number[];
+  move_only?: boolean;
   raw?: any;
 };
 
@@ -231,6 +232,7 @@ function stickerUrlFor(row: Row) {
 export default function VaccinationValidationPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [movedHistoryRows, setMovedHistoryRows] = useState<Row[]>([]);
+  const [moveCandidateRows, setMoveCandidateRows] = useState<Row[]>([]);
   const [cancelledHistoryRows, setCancelledHistoryRows] = useState<Row[]>([]);
   const [sessionLocations, setSessionLocations] = useState<string[]>([]);
   const [sessionOptions, setSessionOptions] = useState<SessionOption[]>([]);
@@ -276,6 +278,7 @@ export default function VaccinationValidationPage() {
       if (!json.ok) throw new Error(json.message || "Gagal memuat validasi.");
       setRows(json.rows || []);
       setMovedHistoryRows(Array.isArray(json.moved_rows) ? json.moved_rows : []);
+      setMoveCandidateRows(Array.isArray(json.move_candidates) ? json.move_candidates : []);
       setCancelledHistoryRows(Array.isArray(json.cancelled_rows) ? json.cancelled_rows : []);
       setSessionOptions(Array.isArray(json.sessions) ? json.sessions : []);
       setSessionLocations(
@@ -390,17 +393,19 @@ export default function VaccinationValidationPage() {
     return {
       shown: rows.filter(matches),
       moved: movedHistoryRows.filter(matches),
+      moveCandidates: moveCandidateRows.filter(matches),
       cancelled: cancelledHistoryRows.filter(matches),
     };
-  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, movedHistoryRows, cancelledHistoryRows, serviceFilter, sessionFilter]);
+  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, movedHistoryRows, moveCandidateRows, cancelledHistoryRows, serviceFilter, sessionFilter]);
   const shown = filteredGroups.shown;
   const movedShown = filteredGroups.moved;
+  const moveCandidatesShown = filteredGroups.moveCandidates;
   const cancelledShown = filteredGroups.cancelled;
   const allValidationShown = useMemo(() => {
     const unique = new Map<string, Row>();
-    for (const row of [...shown, ...movedShown, ...cancelledShown]) unique.set(rowStateKey(row), row);
+    for (const row of [...shown, ...moveCandidatesShown, ...movedShown, ...cancelledShown]) unique.set(rowStateKey(row), row);
     return Array.from(unique.values());
-  }, [shown, movedShown, cancelledShown]);
+  }, [shown, moveCandidatesShown, movedShown, cancelledShown]);
 
   const pendingShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() !== "DONE"), [shown]);
   const doneShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() === "DONE"), [shown]);
@@ -807,6 +812,35 @@ export default function VaccinationValidationPage() {
 
         {message ? <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm font-bold text-blue-700">{message}</div> : null}
       </section>
+
+      {moveCandidatesShown.length ? (
+        <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-amber-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50 px-5 py-4">
+            <div><div className="font-black text-amber-950">Bazar terbayar — belum masuk Validasi</div>
+              <div className="mt-1 text-xs font-semibold text-amber-900">Belum disuntik dan belum memiliki catatan pindah. Untuk kasus yang dikonfirmasi pindah ke Klinik, gunakan tombol Pindah Lokasi. Tidak tersedia tombol Done.</div>
+            </div>
+            <div className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-black text-amber-800">{moveCandidatesShown.length} transaksi</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] border-collapse text-left text-sm">
+              <thead className="bg-amber-50/40 text-xs font-black uppercase tracking-wide text-slate-600"><tr>
+                <th className="px-4 py-3">Antrean Bazar</th><th className="px-4 py-3">Peserta</th><th className="px-4 py-3">Produk belum disuntik</th><th className="px-4 py-3">Pembayaran</th><th className="px-4 py-3">Tindakan</th>
+              </tr></thead>
+              <tbody className="divide-y divide-slate-100">
+                {moveCandidatesShown.map((row) => (
+                  <tr key={`move-only-${rowStateKey(row)}`} className="align-top">
+                    <td className="px-4 py-4 font-black">{row.queue_number || "-"}</td>
+                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="text-xs text-slate-500">BAZAR · {row.employee_id || "-"}</div></td>
+                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`pending-move-${rowStateKey(row)}-${index}`} className="rounded bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1}</div>)}</div></td>
+                    <td className="px-4 py-4"><div className="font-bold">{row.payment_method || "-"}</div><div className="text-xs text-slate-500">Pembayaran tervalidasi</div></td>
+                    <td className="px-4 py-4"><button type="button" onClick={() => openMove(row)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Pindah Lokasi</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {recordOnlyMode ? (
         <>
