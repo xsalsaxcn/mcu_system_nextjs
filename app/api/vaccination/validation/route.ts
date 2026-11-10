@@ -557,7 +557,8 @@ export async function GET(req: NextRequest) {
     // It is not in the CANCELLED bucket. Read the explicit movement note from
     // all source registrations; never infer movement from DONE or payment alone.
     const movedNoteSource = (cancelledResult.data || []).filter((row: any) =>
-      /pindah\s+lokasi\s+layanan\s+dari\s+.+\s+ke\s+.+/i.test(clean(row.status_note || row.cancelled_note))
+      /pindah\s+lokasi\s+layanan\s+dari\s+.+\s+ke\s+.+/i.test(clean(row.status_note)) ||
+      /pindah\s+lokasi\s+layanan\s+dari\s+.+\s+ke\s+.+/i.test(clean(row.cancelled_note))
     );
     const cancelledIds = cancelledSource.map((row: any) => Number(row.id)).filter(Boolean);
     const historyIds = Array.from(new Set([
@@ -601,49 +602,79 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const movedRows = cancelledRows.filter((row: any) => /pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
+    // V620 READ-ONLY: preserve the historical cancellation list, but classify
+    // explicit movement notes by ACTIVE, unadministered vaccine items per service.
+    // A cancelled Healthday track on a Bazar-only registration is NOT evidence
+    // that the patient's Healthday vaccine was moved.
+    const movedRows: any[] = cancelledRows.filter((row: any) => /pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
     const plainCancelledRows = cancelledRows.filter((row: any) => !/pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
 
-    // V619: A genuine move-to-clinic can be DONE at registration/queue level,
-    // but WAITING at the vaccine-item level. Include it in moved history for
-    // its *own* service; do not mislabel an already-administered other service.
-    const movedKeys = new Set(movedRows.map((row: any) => clean(row.row_key)));
+    const waitingMoveStatus = (value: any) =>
+      ["WAITING", "PENDING", "PENDING_VALIDATION", "REGISTERED", "SCHEDULED"].includes(clean(value).toUpperCase());
     for (const registration of movedNoteSource) {
       const id = Number(registration.id);
       const itemRows = cancelledItemsByRegistration.get(id) || [];
-      const pendingServices = Array.from(new Set<"HEALTHDAY" | "BAZAR">(
-        itemRows
-          .filter((item: any) => !["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase()))
-          .map((item: any) => normalizeServiceMode(item.service_mode))
+      const waitingItems = itemRows.filter((item: any) => item.active !== false && waitingMoveStatus(item.status));
+      const waitingServices = Array.from(new Set<"HEALTHDAY" | "BAZAR">(
+        waitingItems.map((item: any) => normalizeServiceMode(item.service_mode))
       ));
-      // No unfinished item = do not reinterpret an administered vaccine as moved.
-      if (!pendingServices.length) continue;
+      if (!waitingServices.length) continue; // historical notes without item evidence: unchanged
+
+      // If BOTH services are unfinished and one note covers the registration,
+      // it is ambiguous; do not guess which paid/free service went to clinic.
       const declaredMode = clean(registration.patient_service_status).toUpperCase();
-      const serviceMode = pendingServices.length === 1
-        ? pendingServices[0]
-        : pendingServices.find((mode) => mode === declaredMode);
-      // Ambiguous dual-service note must not be assigned to the wrong service.
+      const serviceMode = waitingServices.length === 1
+        ? waitingServices[0]
+        : waitingServices.find((mode) => mode === declaredMode);
       if (!serviceMode) continue;
+      const serviceItems = itemRows.filter((item: any) => normalizeServiceMode(item.service_mode) === serviceMode);
+      // A partially administered service needs per-dose workflow evidence;
+      // never silently recategorize a completed injection as moved.
+      if (serviceItems.some((item: any) => ["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase()))) continue;
+      const pendingForService = waitingItems.filter((item: any) => normalizeServiceMode(item.service_mode) === serviceMode);
+      if (!pendingForService.length) continue;
+
       const recordRows = cancelledRecordsByRegistration.get(id) || [];
-      const flags = queueFlags(registration);
-      const displayed = flags.healthdayQueueEnabled && flags.bazarQueueEnabled
-        ? displayLegacy(registration, recordRows, itemRows)
-        : displayForService(registration, serviceMode, recordRows, itemRows);
-      // Legacy display chooses mode by patient_service_status. If it differs
-      // from the unfinished service, create the explicit correct service view.
-      const movedDisplay = displayed.validation_service_mode === serviceMode
-        ? displayed
-        : displayForService(registration, serviceMode, recordRows, itemRows);
-      const key = clean(movedDisplay.row_key);
-      if (movedKeys.has(key)) continue;
-      movedDisplay.validation_status = "MOVED"; // response only; no DB update
+      const movedDisplay = displayForService(registration, serviceMode, recordRows, itemRows);
+      // Only the unfinished items of this specific service belong in the
+      // moved CSV/payment snapshot. Healthday already administered stays Done.
+      movedDisplay.products = pendingForService.map(itemDetail);
+      movedDisplay.record_ids = [];
+      movedDisplay.product_name = movedDisplay.products.length === 1
+        ? movedDisplay.products[0].vaccine_name
+        : `${movedDisplay.products.length} vaksin / layanan`;
+      movedDisplay.lot_number = movedDisplay.products.length === 1 ? movedDisplay.products[0].lot_number : "";
+      movedDisplay.note = /pindah\s+lokasi\s+layanan/i.test(clean(registration.status_note))
+        ? clean(registration.status_note)
+        : clean(registration.cancelled_note);
+      movedDisplay.payment_method = serviceMode === "BAZAR"
+        ? (clean(registration.payment_method) || clean(pendingForService[0]?.payment_method))
+        : "";
+      movedDisplay.validation_status = "MOVED"; // response only; never update Supabase
+      movedDisplay.validated_at = null; // moving to clinic is NOT vaccine administration
+      movedDisplay.validated_by = "";
+
+      // Replace any historical *mislabelled* HEALTHDAY moved row for this exact
+      // registration; do not touch other participants with a shared BINUSIAN ID.
+      for (let index = movedRows.length - 1; index >= 0; index--) {
+        if (Number(movedRows[index].id) === id) movedRows.splice(index, 1);
+      }
       movedRows.push(movedDisplay);
-      movedKeys.add(key);
     }
+
+    // A legacy row can have key `id:LEGACY` but represent BAZAR. Deduplicate
+    // by registration ID + actual service too, never by person / employee ID.
+    const movedKeys = new Set(movedRows.map((row: any) => clean(row.row_key)));
+    const movedServiceKeys = new Set(movedRows.map((row: any) =>
+      `${Number(row.id)}:${clean(row.validation_service_mode).toUpperCase()}`
+    ));
 
     return json({
       ok: true,
-      rows: rows.filter((row: any) => !movedKeys.has(clean(row.row_key))),
+      rows: rows.filter((row: any) =>
+        !movedKeys.has(clean(row.row_key)) &&
+        !movedServiceKeys.has(`${Number(row.id)}:${clean(row.validation_service_mode).toUpperCase()}`)
+      ),
       moved_rows: movedRows,
       cancelled_rows: plainCancelledRows,
       session_locations: sessionLocations,
