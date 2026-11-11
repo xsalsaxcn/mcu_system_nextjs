@@ -20,7 +20,7 @@ function userLabel(user: any) {
   return user?.email || user?.name || user?.id || "system";
 }
 
-const BAZAR_PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"]);
+const BAZAR_PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER", "PREPAID_PREVIOUS_EVENT"]);
 
 function isHealthdayBazarSession(session: any) {
   return String(session?.existing_queue_profile || "LEGACY").trim().toUpperCase() === "HEALTHDAY_BAZAR";
@@ -85,7 +85,7 @@ async function validateBazarItems(supabase: any, items: any[], allowBazar: boole
 
   for (const item of bazarItems) {
     if (!normalizeBazarPaymentMethod(item?.payment_method)) {
-      return "Metode pembayaran Bazar wajib QRIS, Debit, Credit Card, atau Transfer.";
+      return "Pilih metode pembayaran Bazar yang valid, termasuk Sudah Lunas - Suntikan Lanjutan.";
     }
   }
 
@@ -110,6 +110,12 @@ async function validateBazarItems(supabase: any, items: any[], allowBazar: boole
   }
 
   for (const item of bazarItems) {
+    if (normalizeBazarPaymentMethod(item.payment_method) === "PREPAID_PREVIOUS_EVENT") {
+      if (clean(item.payment_note).length < 4) return "Bukti pembayaran event sebelumnya wajib diisi pada Catatan Payment.";
+      if (normalizeSaleMode(item.sale_mode) !== "NON_PACKAGE" || Number(item.package_dose_count || 1) > 1) {
+        return "Suntikan lanjutan sudah lunas hanya boleh satu dosis Non Paket per produk, bukan pembelian Paket baru.";
+      }
+    }
     const vaccineId = Number(item.vaccine_id || 0);
     const mode = normalizeSaleMode(item.sale_mode);
     const offer = offerMap.get(`${vaccineId}:${mode}`);
@@ -926,7 +932,8 @@ async function createItemsForRegistration(supabase: any, registration: any, item
     const selectedPrice = offer?.price == null
       ? (saleMode === "NON_PACKAGE" ? fallbackMasterPrice : null)
       : moneyNumber(offer.price);
-    const basePrice = isFreeHealthday
+    const paidPreviousEvent = serviceMode === "BAZAR" && normalizeBazarPaymentMethod(item.payment_method) === "PREPAID_PREVIOUS_EVENT";
+    const basePrice = isFreeHealthday || paidPreviousEvent
       ? 0
       : serviceMode === "BAZAR"
         ? selectedPrice
@@ -937,13 +944,16 @@ async function createItemsForRegistration(supabase: any, registration: any, item
         ? normalizeBazarPaymentMethod(item.payment_method)
         : (item.payment_method || null);
 
-    if (serviceMode === "BAZAR" && (basePrice == null || Number(basePrice) <= 0)) {
+    if (serviceMode === "BAZAR" && (selectedPrice == null || Number(selectedPrice) <= 0)) {
       throw new Error(saleMode === "PACKAGE" ? "Harga Paket Bazar belum tersedia di master produk." : "Harga Non Paket Bazar belum tersedia di master produk.");
     }
     if (serviceMode === "BAZAR" && !paymentMethod) {
-      throw new Error("Metode pembayaran Bazar wajib QRIS, Debit, Credit Card, atau Transfer.");
+      throw new Error("Metode pembayaran Bazar tidak valid.");
     }
 
+    if (paidPreviousEvent && (saleMode !== "NON_PACKAGE" || Number(item.package_dose_count || 1) > 1 || clean(item.payment_note).length < 4)) {
+      throw new Error("Suntikan lanjutan sudah lunas perlu referensi pembayaran lama dan satu dosis Non Paket.");
+    }
     const surchargePercent = serviceMode === "BAZAR" && paymentMethod === "CREDIT_CARD" ? 3 : 0;
     const surchargeAmount = basePrice == null ? 0 : moneyNumber(basePrice * surchargePercent / 100);
     const paymentTotal = basePrice == null ? null : moneyNumber(basePrice + surchargeAmount);

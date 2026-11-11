@@ -80,6 +80,11 @@ function clean(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function paymentMethodLabelV625(value: any) {
+  const method = clean(value).toUpperCase();
+  return method === "PREPAID_PREVIOUS_EVENT" ? "Sudah Lunas - Suntikan Lanjutan" : (clean(value) || "-");
+}
+
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 20000) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -221,7 +226,7 @@ function exportValidationRows(rows: Row[], label: string) {
       moved.moved ? "PINDAH LOKASI" : clean(row.validation_status || row.queue_status || "PENDING"),
       clean(row.queue_number), clean(row.patient_name), clean(row.employee_id),
       clean(row.company_name), clean(row.session_name), clean(row.location), dateKey(row.session_date),
-      clean(row.validation_service_mode), products || clean(row.product_name), clean(row.payment_method),
+      clean(row.validation_service_mode), products || clean(row.product_name), paymentMethodLabelV625(row.payment_method),
       clean(row.validated_by), fmtDate(row.validated_at), clean(row.note),
       exportMoney(money.base), exportMoney(money.charge), money.rate === null ? "" : exportMoney(money.rate), exportMoney(money.total),
       money.evidence, money.source, moved.source, moved.target, moved.targetRegistration,
@@ -986,7 +991,7 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4 font-black">{row.queue_number || "-"}</td>
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="text-xs text-slate-500">BAZAR · {row.employee_id || "-"}</div></td>
                     <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`pending-move-${rowStateKey(row)}-${index}`} className="rounded bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1}</div>)}</div></td>
-                    <td className="px-4 py-4"><div className="font-bold">{row.payment_method || "-"}</div><div className="text-xs text-slate-500">Pembayaran tervalidasi</div></td>
+                    <td className="px-4 py-4"><div className="font-bold">{paymentMethodLabelV625(row.payment_method)}</div><div className="text-xs text-slate-500">Pembayaran tervalidasi</div></td>
                     <td className="px-4 py-4"><button type="button" onClick={() => openMove(row)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Pindah Lokasi</button></td>
                   </tr>
                 ))}
@@ -1041,7 +1046,7 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4">
                       <div className="space-y-1">{(row.products || []).map((item, index) => <div key={`${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div>
                     </td>
-                    <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                    <td className="px-4 py-4 font-bold">{paymentMethodLabelV625(row.payment_method)}</td>
                     <td className="px-4 py-4"><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">{row.validation_status || row.queue_status || "PENDING"}</span></td>
                     <td className="px-4 py-4">
                       {isBazarItemRow(row) ? (
@@ -1108,7 +1113,7 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                     <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div></td>
-                    <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                    <td className="px-4 py-4 font-bold">{paymentMethodLabelV625(row.payment_method)}</td>
                     <td className="px-4 py-4"><div className="font-bold">{fmtDate(row.validated_at) || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.validated_by || "-"}</td>
                     <td className="px-4 py-4"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai</span></td>
@@ -1182,7 +1187,7 @@ export default function VaccinationValidationPage() {
                   <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
                   <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                   <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`cancel-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div></td>
-                  <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                  <td className="px-4 py-4 font-bold">{paymentMethodLabelV625(row.payment_method)}</td>
                   <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">{row.note || "-"}</div></td>
                   <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
                 </tr>)}
@@ -1389,7 +1394,7 @@ export default function VaccinationValidationPage() {
       {moveRow ? (
         <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !moveBusy) setMoveRow(null); }}>
           <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
-            <div className="border-b px-5 py-4"><div className="text-xs font-black uppercase text-blue-700">Pindah Lokasi Suntik</div><div className="mt-1 text-xl font-black">{moveRow.patient_name || "Peserta"}</div><div className="mt-1 text-sm font-semibold text-slate-500">Pasien sudah terdaftar layanan {moveRow.product_name || "Vaksin"} di {clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {moveRow.location || moveRow.session_name || "-"}</div>{clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? <div className="mt-1 text-sm font-bold text-violet-700">{(moveRow.products || []).some((item) => clean(item.sale_mode).toUpperCase() === "PACKAGE") ? "Paket" : "Non Paket"} · Payment {moveRow.payment_method || "-"}</div> : null}</div>
+            <div className="border-b px-5 py-4"><div className="text-xs font-black uppercase text-blue-700">Pindah Lokasi Suntik</div><div className="mt-1 text-xl font-black">{moveRow.patient_name || "Peserta"}</div><div className="mt-1 text-sm font-semibold text-slate-500">Pasien sudah terdaftar layanan {moveRow.product_name || "Vaksin"} di {clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {moveRow.location || moveRow.session_name || "-"}</div>{clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? <div className="mt-1 text-sm font-bold text-violet-700">{(moveRow.products || []).some((item) => clean(item.sale_mode).toUpperCase() === "PACKAGE") ? "Paket" : "Non Paket"} · Payment {paymentMethodLabelV625(moveRow.payment_method)}</div> : null}</div>
             <div className="space-y-4 p-5">
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Tujuan<select className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" value={moveTarget} onChange={(e) => { setMoveTarget(e.target.value); setMoveVendorQueue(""); setMoveFeedback(""); }}><option value="">Pilih Session / Lokasi</option><option value="CLINIC">Vaksin di Klinik</option>{sessionOptions.filter((item) => String(item.session_id) !== String(moveRow.session_id) && (!clean(item.company_name) || !clean(moveRow.company_name) || clean(item.company_name) === clean(moveRow.company_name))).map((item) => <option key={item.session_id} value={String(item.session_id)}>{item.session_date ? `${item.session_date} · ` : ""}{item.location || item.session_name}</option>)}</select></label>
               {moveTarget && moveTarget !== "CLINIC" && !targetQueueEnabled(sessionOptions.find((item) => String(item.session_id) === String(moveTarget)) || null, clean(moveRow.validation_service_mode).toUpperCase()) ? <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nomor Antrean Vendor Tujuan<input className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" placeholder="Wajib untuk Session record-only/vendor" value={moveVendorQueue} onChange={(e) => setMoveVendorQueue(e.target.value)} /></label> : null}

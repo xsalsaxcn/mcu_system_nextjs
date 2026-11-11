@@ -102,6 +102,8 @@ export default function VaccinationManualWalkInController({
   const bazarPaymentMethod = clean(
     form?.paymentMethod || form?.payment_method,
   ).toUpperCase();
+  // V625.2: previously-paid visit is NOT a new sale and never implies an injection.
+  const isPaidPreviousEvent = bazarPaymentMethod === "PREPAID_PREVIOUS_EVENT";
   const participantIdentity = `${Number(
     form?.participantId || form?.participant_id || 0,
   )}:${Number(form?.historyPersonId || 0)}`;
@@ -289,7 +291,7 @@ export default function VaccinationManualWalkInController({
     bazarPaymentMethod === "CREDIT_CARD"
       ? Math.round(bazarSubtotal * 0.03 * 100) / 100
       : 0;
-  const bazarTotal = bazarSubtotal + bazarSurcharge;
+  const bazarTotal = isPaidPreviousEvent ? 0 : bazarSubtotal + bazarSurcharge;
 
   function toggle(item: any, mode: QueueMode) {
     const key = optionKey(item);
@@ -360,13 +362,17 @@ export default function VaccinationManualWalkInController({
     }
     if (
       bazarSelected.length &&
-      !["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"].includes(
+      !["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER", "PREPAID_PREVIOUS_EVENT"].includes(
         bazarPaymentMethod,
       )
     ) {
       setError(
-        "Pilih metode pembayaran Bazar: QRIS, Debit, Credit Card, atau Transfer.",
+        "Pilih metode pembayaran Bazar: QRIS, Debit, Credit Card, Transfer, atau Sudah Lunas - Suntikan Lanjutan.",
       );
+      return;
+    }
+    if (bazarSelected.length && isPaidPreviousEvent && clean(form?.paymentNote || form?.payment_note).length < 4) {
+      setError("Isi catatan bukti pembayaran sebelumnya (event, kuitansi, atau nomor transaksi).");
       return;
     }
     if (
@@ -414,7 +420,7 @@ export default function VaccinationManualWalkInController({
 
       const bazarItems = bazarSelected.map((item: any) => {
         const key = optionKey(item);
-        const chosenMode = bazarSaleModeByKey[key] || "NON_PACKAGE";
+        const chosenMode = isPaidPreviousEvent ? "NON_PACKAGE" : (bazarSaleModeByKey[key] || "NON_PACKAGE");
         const offer = selectedOffer(item, chosenMode);
         return {
           vaccineId: Number(item?.vaccine_id || item?.vaccine?.id || 0),
@@ -642,12 +648,10 @@ export default function VaccinationManualWalkInController({
               Metode Pembayaran
               <select
                 value={bazarPaymentMethod}
-                onChange={(e) =>
-                  setForm((previous: any) => ({
-                    ...previous,
-                    paymentMethod: e.target.value,
-                  }))
-                }
+                onChange={(e) => {
+                  setForm((previous: any) => ({ ...previous, paymentMethod: e.target.value }));
+                  if (e.target.value === "PREPAID_PREVIOUS_EVENT") setBazarSaleModeByKey({});
+                }}
                 className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-bold"
               >
                 <option value="">Pilih metode pembayaran</option>
@@ -655,11 +659,12 @@ export default function VaccinationManualWalkInController({
                 <option value="DEBIT">Debit</option>
                 <option value="CREDIT_CARD">Credit Card +3%</option>
                 <option value="TRANSFER">Transfer</option>
+                <option value="PREPAID_PREVIOUS_EVENT">Sudah Lunas - Suntikan Lanjutan</option>
               </select>
             </label>
             <div className="rounded-xl border bg-slate-50 px-4 py-2 text-right text-xs font-bold text-slate-600">
-              <div>Subtotal Rp {money(bazarSubtotal)}</div>
-              <div>CC +3% Rp {money(bazarSurcharge)}</div>
+              <div>{isPaidPreviousEvent ? "Harga referensi" : "Subtotal"} Rp {money(bazarSubtotal)}</div>
+              <div>{isPaidPreviousEvent ? "Dibayar di event sebelumnya" : `CC +3% Rp ${money(bazarSurcharge)}`}</div>
               <div className="mt-1 text-sm font-black text-violet-700">
                 Total Rp {money(bazarTotal)}
               </div>
@@ -667,7 +672,7 @@ export default function VaccinationManualWalkInController({
           </div>
 
           <label className="mt-3 block text-xs font-bold text-slate-700">
-            Catatan Payment / Tambahan Vaksin
+            {isPaidPreviousEvent ? "Bukti Bayar Sebelumnya (wajib)" : "Catatan Payment / Tambahan Vaksin"}
             <input
               value={form?.paymentNote ?? form?.payment_note ?? ""}
               onChange={(e) =>
@@ -676,10 +681,16 @@ export default function VaccinationManualWalkInController({
                   paymentNote: e.target.value,
                 }))
               }
-              placeholder="Opsional"
+              placeholder={isPaidPreviousEvent ? "Event sebelumnya / kuitansi / nomor transaksi" : "Opsional"}
               className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
             />
           </label>
+        </div>
+      ) : null}
+
+      {serviceMode === "BAZAR" && isPaidPreviousEvent ? (
+        <div className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-900">
+          Hanya satu dosis suntikan lanjutan per produk. Tagihan kunjungan Rp0; pembayaran lama tidak ditagih ulang. Stok baru berkurang saat Validasi Done.
         </div>
       ) : null}
 
@@ -851,11 +862,11 @@ export default function VaccinationManualWalkInController({
             const lot = clean(item?.lot?.lot_number);
             const expiry = clean(item?.lot?.expiry_date);
             const isBazar = serviceMode === "BAZAR";
-            const itemSaleMode = bazarSaleModeByKey[key] || "NON_PACKAGE";
+            const itemSaleMode = isPaidPreviousEvent ? "NON_PACKAGE" : (bazarSaleModeByKey[key] || "NON_PACKAGE");
             const offer = isBazar ? selectedOffer(item, itemSaleMode) : null;
             const price = isBazar ? Number(offer?.price || 0) : Number(item?.vaccine?.price);
             const availableOffers = offersFor(item);
-            const packageOffer = availableOffers.find((row: any) => saleMode(row?.sale_mode) === "PACKAGE");
+            const packageOffer = isPaidPreviousEvent ? undefined : availableOffers.find((row: any) => saleMode(row?.sale_mode) === "PACKAGE");
             const nonPackageOffer = selectedOffer(item, "NON_PACKAGE");
 
             return (

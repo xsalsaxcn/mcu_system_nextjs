@@ -63,6 +63,7 @@ function paymentMethodLabel(value: any) {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) return "-";
   if (raw === "CREDIT_CARD") return "Credit Card";
+  if (raw === "PREPAID_PREVIOUS_EVENT") return "Sudah Lunas - Suntikan Lanjutan";
   return raw.charAt(0) + raw.slice(1).toLowerCase();
 }
 
@@ -128,6 +129,7 @@ export default function VaccinationRegisterPage() {
   const [selfBookingLoading, setSelfBookingLoading] = useState(false);
   const [processingBooking, setProcessingBooking] = useState<any | null>(null);
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState("QRIS");
+  const [bookingPreviousPaymentReference, setBookingPreviousPaymentReference] = useState("");
   const [bookingPaymentValidated, setBookingPaymentValidated] = useState(false);
   const [bookingProcessing, setBookingProcessing] = useState(false);
   const [bookingProcessError, setBookingProcessError] = useState("");
@@ -764,6 +766,9 @@ export default function VaccinationRegisterPage() {
   async function processSelfBooking() {
     if (!processingBooking) return;
     if (!bookingPaymentValidated) { setBookingProcessError("Centang Validasi Pembayaran sebelum memproses Self Booking."); return; }
+    if (bookingPaymentMethod === "PREPAID_PREVIOUS_EVENT" && bookingPreviousPaymentReference.trim().length < 4) {
+      setBookingProcessError("Isi referensi pembayaran event sebelumnya."); return;
+    }
     setBookingProcessing(true);
     setBookingProcessError("");
     try {
@@ -775,6 +780,7 @@ export default function VaccinationRegisterPage() {
             action: "PROCESS",
             bookingId: Number(processingBooking.id),
             paymentMethod: bookingPaymentMethod,
+            previousPaymentReference: bookingPaymentMethod === "PREPAID_PREVIOUS_EVENT" ? bookingPreviousPaymentReference.trim() : undefined,
             paymentValidated: true,
             confirmedSeriesDoses,
           }),
@@ -2309,10 +2315,14 @@ export default function VaccinationRegisterPage() {
                           <option value="DEBIT">Debit</option>
                           <option value="CREDIT_CARD">Credit Card +3%</option>
                           <option value="TRANSFER">Transfer</option>
+                          <option value="PREPAID_PREVIOUS_EVENT">Sudah Lunas - Suntikan Lanjutan</option>
                         </select>
                       ) : (
                         <input disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Payment note / metode" value={item.paymentNote || item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value })} />
                       )}
+                      {healthdayBazarEnabled && item.serviceMode === "BAZAR" && item.paymentMethod === "PREPAID_PREVIOUS_EVENT" && !isDoneStatus(item.status) ? (
+                        <input className="rounded-xl border border-violet-300 bg-violet-50 px-3 py-2.5" placeholder="Bukti bayar sebelumnya (wajib)" value={item.paymentNote || ""} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value, saleMode: "NON_PACKAGE", packageDoseCount: 1 })} />
+                      ) : null}
                       <div className="flex items-center gap-2">
                         {isDoneStatus(item.status) ? <span className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700">Done</span> : <span className="rounded-xl bg-orange-100 px-3 py-2 text-xs font-black text-orange-700">Not Done</span>}
                         <button disabled={isDoneStatus(item.status)} type="button" onClick={() => removeEditItem(index)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-40">Hapus</button>
@@ -2371,7 +2381,7 @@ export default function VaccinationRegisterPage() {
                         </td>
                         <td className="p-3 font-black text-violet-700">{money(booking.estimated_total)}</td>
                         <td className="p-3"><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Menunggu Proses</span></td>
-                        <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openSelfBookingEdit(booking)} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-50">Edit</button><button type="button" onClick={() => { setProcessingBooking(booking); setBookingPaymentMethod("QRIS"); setBookingPaymentValidated(false); setBookingProcessError(""); }} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700">Process</button></div></td>
+                        <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openSelfBookingEdit(booking)} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-50">Edit</button><button type="button" onClick={() => { setProcessingBooking(booking); setBookingPaymentMethod("QRIS"); setBookingPreviousPaymentReference(""); setBookingPaymentValidated(false); setBookingProcessError(""); }} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700">Process</button></div></td>
                       </tr>
                     );
                   })}
@@ -2795,11 +2805,16 @@ export default function VaccinationRegisterPage() {
                   <option value="DEBIT">Debit</option>
                   <option value="CREDIT_CARD">Credit Card</option>
                   <option value="TRANSFER">Transfer</option>
+                  <option value="PREPAID_PREVIOUS_EVENT">Sudah Lunas - Suntikan Lanjutan</option>
                 </select>
+                {bookingPaymentMethod === "PREPAID_PREVIOUS_EVENT" ? (
+                  <input className="mt-2 w-full rounded-xl border border-violet-300 px-3 py-2 text-sm font-semibold" placeholder="Referensi event/kuitansi sebelumnya (wajib)" value={bookingPreviousPaymentReference} onChange={(event) => { setBookingPreviousPaymentReference(event.target.value); setBookingPaymentValidated(false); }} />
+                ) : null}
               </label>
               <div className="rounded-2xl bg-violet-50 px-5 py-3 text-right">
                 <div className="text-[10px] font-black uppercase text-violet-500">Estimasi</div>
-                <div className="text-xl font-black text-violet-800">{money(processingBooking.estimated_total)}</div>
+                <div className="text-xl font-black text-violet-800">{bookingPaymentMethod === "PREPAID_PREVIOUS_EVENT" ? money(0) : money(processingBooking.estimated_total)}</div>
+                {bookingPaymentMethod === "PREPAID_PREVIOUS_EVENT" ? <div className="mt-1 text-xs font-semibold text-violet-700">Sudah dibayar sebelumnya · tagihan kunjungan Rp0</div> : null}
                 {bookingPaymentMethod === "CREDIT_CARD" ? <div className="mt-1 text-[11px] font-bold text-violet-600">Total final akan termasuk CC +3%</div> : null}
               </div>
             </div>

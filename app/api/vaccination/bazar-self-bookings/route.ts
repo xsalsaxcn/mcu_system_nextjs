@@ -5,7 +5,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"]);
+const PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER", "PREPAID_PREVIOUS_EVENT"]);
 
 function actorLabel(user: any) {
   return clean(user?.email || user?.name || user?.id) || "Tim Registrasi";
@@ -574,7 +574,18 @@ export async function POST(req: NextRequest) {
   if (clean(booking.booking_status).toUpperCase() !== "PENDING") return fail("Self Booking ini sudah diproses atau dibatalkan.", 409);
 
   const paymentMethod = normalizePayment(body.paymentMethod || body.payment_method);
-  if (!paymentMethod) return fail("Pilih metode pembayaran: QRIS, Debit, Credit Card, atau Transfer.");
+  if (!paymentMethod) return fail("Pilih metode pembayaran yang valid.");
+  const previousPaymentReference = paymentMethod === "PREPAID_PREVIOUS_EVENT"
+    ? clean(body.previousPaymentReference || body.previous_payment_reference)
+    : "";
+  if (paymentMethod === "PREPAID_PREVIOUS_EVENT" && previousPaymentReference.length < 4) {
+    return fail("Isi bukti pembayaran event sebelumnya (nomor transaksi/kuitansi) sebelum memproses.");
+  }
+  if (paymentMethod === "PREPAID_PREVIOUS_EVENT" && (booking.selected_items || []).some((row: any) =>
+    normalizeSaleMode(row.saleMode || row.sale_mode) !== "NON_PACKAGE" || safeQuantity(row.quantity) !== 1
+  )) {
+    return fail("Sudah lunas - suntikan lanjutan hanya boleh 1 dosis Non Paket per produk.");
+  }
   if (body.paymentValidated !== true && body.payment_validated !== true) return fail("Centang Validasi Pembayaran sebelum memproses Self Booking.");
 
   const sessionId = Number(booking.session_id || 0);
@@ -721,6 +732,10 @@ export async function POST(req: NextRequest) {
   const nextQueue = internalQueue ? await nextBazarQueue(supabase, sessionId) : null;
   const now = new Date().toISOString();
   const actor = actorLabel(user);
+  const prepaidReturn = paymentMethod === "PREPAID_PREVIOUS_EVENT";
+  const paymentDescription = prepaidReturn
+    ? `Sudah lunas event sebelumnya · Referensi: ${previousPaymentReference} · ${actor}`
+    : "Self Booking Bazar · pembayaran tervalidasi";
   const registrationPayload: Record<string, any> = {
     session_id: sessionId,
     source_id: Number(booking.source_id || session.source_id || 0) || null,
@@ -736,9 +751,9 @@ export async function POST(req: NextRequest) {
     phone: clean(booking.phone) || null,
     company_name: clean(booking.company_name || session.company_name) || null,
     department: clean(booking.department) || null,
-    payment_price: prepared.total,
+    payment_price: prepaidReturn ? 0 : prepared.total,
     payment_method: paymentMethod,
-    payment_note: "Self Booking Bazar · pembayaran tervalidasi",
+    payment_note: paymentDescription,
     queue_number: null,
     queue_status: "REGISTERED",
     bazar_queue_number: nextQueue?.number || null,
@@ -766,9 +781,9 @@ export async function POST(req: NextRequest) {
     lot_id: item.lotId,
     dose_number: item.startDose,
     price_category: null,
-    price: money(item.unitPrice * item.quantity),
+    price: prepaidReturn ? 0 : money(item.unitPrice * item.quantity),
     payment_method: paymentMethod,
-    payment_note: "Self Booking Bazar · pembayaran tervalidasi",
+    payment_note: paymentDescription,
     item_note: (item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity) > 1
       ? `PREPAID ${item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity} dosis; mulai dosis ${item.startDose}. Hanya dosis saat kunjungan ini masuk alur Validasi; sisa dosis wajib dijadwalkan terpisah.`
       : (item.startDose > 1 ? `Dosis lanjutan ke-${item.startDose}; cek riwayat dan interval medis.` : null),
@@ -776,10 +791,10 @@ export async function POST(req: NextRequest) {
     sales_option_id: item.salesOptionId,
     sale_mode: item.saleMode,
     package_dose_count: item.saleMode === "PACKAGE" ? item.packageDoseCount : item.quantity,
-    sales_price_snapshot: item.unitPrice,
-    payment_surcharge_percent: item.surchargePercent,
-    payment_surcharge_amount: item.surchargeAmount,
-    payment_total: item.paymentTotal,
+    sales_price_snapshot: prepaidReturn ? 0 : item.unitPrice,
+    payment_surcharge_percent: prepaidReturn ? 0 : item.surchargePercent,
+    payment_surcharge_amount: prepaidReturn ? 0 : item.surchargeAmount,
+    payment_total: prepaidReturn ? 0 : item.paymentTotal,
     item_source: "bazar_self_booking",
     status: "WAITING",
     active: true,
