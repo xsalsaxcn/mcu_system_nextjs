@@ -290,6 +290,13 @@ export default function VaccinationValidationPage() {
   const [itemActionSelected, setItemActionSelected] = useState<number[]>([]);
   const [itemActionNote, setItemActionNote] = useState("Vaksin lanjutan direncanakan disuntik di Klinik.");
   const [itemActionBusy, setItemActionBusy] = useState(false);
+  // V624: independent edit-stage workflow, never route Bazar into legacy Done reversal.
+  const [stageCorrectionRow, setStageCorrectionRow] = useState<Row | null>(null);
+  const [stageCorrectionMode, setStageCorrectionMode] = useState<"MARK_PENDING_ONLY" | "CORRECT_NOT_INJECTED">("MARK_PENDING_ONLY");
+  const [stageCorrectionIds, setStageCorrectionIds] = useState<number[]>([]);
+  const [stageCorrectionNote, setStageCorrectionNote] = useState("");
+  const [stageCorrectionConfirmed, setStageCorrectionConfirmed] = useState(false);
+  const [stageCorrectionBusy, setStageCorrectionBusy] = useState(false);
 
   async function loadRows() {
     setLoading(true);
@@ -507,6 +514,66 @@ export default function VaccinationValidationPage() {
         ? "Request timeout. Cek ulang status item & movement sebelum mencoba lagi, agar tidak double."
         : (error?.message || "Gagal memproses item."));
     } finally { setItemActionBusy(false); }
+  }
+
+  function correctionEligibleItems(row: Row, mode: "MARK_PENDING_ONLY" | "CORRECT_NOT_INJECTED") {
+    return (row.products || []).filter((item) => {
+      if (clean(item.service_mode).toUpperCase() !== "BAZAR" || Number(item.item_id || 0) < 1 || item.moved_to_clinic) return false;
+      const status = clean(item.status).toUpperCase();
+      return mode === "MARK_PENDING_ONLY"
+        ? status === "WAITING" && !Number(item.record_id || 0) && !item.administered_at
+        : status === "ADMINISTERED" && Number(item.record_id || 0) > 0 && Boolean(item.administered_at);
+    });
+  }
+
+  function openStageCorrection(row: Row) {
+    const mode = correctionEligibleItems(row, "MARK_PENDING_ONLY").length
+      ? "MARK_PENDING_ONLY" : "CORRECT_NOT_INJECTED";
+    setStageCorrectionRow(row);
+    setStageCorrectionMode(mode);
+    setStageCorrectionIds([]);
+    setStageCorrectionNote("");
+    setStageCorrectionConfirmed(false);
+    setMessage("");
+  }
+
+  async function submitStageCorrection() {
+    if (!stageCorrectionRow || stageCorrectionBusy) return;
+    const eligible = correctionEligibleItems(stageCorrectionRow, stageCorrectionMode);
+    const ids = stageCorrectionIds.filter((id) => eligible.some((item) => Number(item.item_id) === id));
+    if (!ids.length) { setMessage("Pilih item Bazar yang ingin dikoreksi."); return; }
+    if (clean(stageCorrectionNote).length < 15) { setMessage("Tuliskan alasan koreksi minimal 15 karakter."); return; }
+    if (stageCorrectionMode === "CORRECT_NOT_INJECTED" && !stageCorrectionConfirmed) {
+      setMessage("Konfirmasi bahwa vaksin BELUM diberikan secara fisik wajib dicentang."); return;
+    }
+    const labels = eligible.filter((item) => ids.includes(Number(item.item_id)))
+      .map((item) => `${item.vaccine_name || "Vaksin"} · dosis ${item.dose_number || 1}`).join("; ");
+    if (!window.confirm(stageCorrectionMode === "CORRECT_NOT_INJECTED"
+      ? `KOREKSI RECORD KLINIS — TIDAK DAPAT DIANGGAP BUKAN SUNTIKAN TANPA VERIFIKASI PETUGAS MEDIS.\n\nYakin vaksin berikut BELUM disuntik?\n${labels}\n\nRecord asli akan VOIDED dengan jejak audit; pemakaian stok item terpilih dikembalikan. Pembayaran tetap.`
+      : `Pastikan item berikut belum disuntik dan hanya akan dijadwalkan.\n${labels}\n\nTidak ada perubahan stok atau pembayaran.`)) return;
+    setStageCorrectionBusy(true);
+    setMessage("Memvalidasi koreksi stage per item...");
+    try {
+      const res = await fetchWithTimeout("/api/vaccination/validation", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ id: stageCorrectionRow.id, service_mode: "BAZAR", actor,
+          action: "V624_BAZAR_STAGE_CORRECTION", stage_action: stageCorrectionMode,
+          item_ids: ids, note: clean(stageCorrectionNote),
+          clinically_confirmed_not_injected: stageCorrectionMode === "CORRECT_NOT_INJECTED" && stageCorrectionConfirmed }),
+      }, 35000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.message || "Koreksi stage ditolak.");
+      setStageCorrectionRow(null);
+      setStageCorrectionIds([]);
+      await loadRows();
+      setMessage(data.message || "Status diperbarui.");
+    } catch (error: any) {
+      await loadRows();
+      setStageCorrectionRow(null);
+      setMessage(error?.name === "AbortError"
+        ? "Timeout; cek ulang item/Inventory sebelum mencoba lagi. Jangan melakukan reversal dua kali."
+        : (error?.message || "Koreksi gagal."));
+    } finally { setStageCorrectionBusy(false); }
   }
 
   function openStageEdit(row: Row) {
@@ -978,7 +1045,10 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4"><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">{row.validation_status || row.queue_status || "PENDING"}</span></td>
                     <td className="px-4 py-4">
                       {isBazarItemRow(row) ? (
-                        <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Kelola Tindakan</button>
+                        <div className="flex min-w-[180px] flex-wrap gap-2">
+                          <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Kelola Tindakan</button>
+                          <button type="button" onClick={() => openStageCorrection(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
+                        </div>
                       ) : (<>
                       <div className="flex min-w-[250px] flex-wrap gap-2">
                         <button type="button" onClick={() => void update(row, "DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
@@ -1044,7 +1114,10 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai</span></td>
                     <td className="px-4 py-4">
                       {isBazarItemRow(row) ? (
-                        <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Detail Tindakan</button>
+                        <div className="flex min-w-[190px] flex-wrap gap-2">
+                          <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Detail Tindakan</button>
+                          <button type="button" onClick={() => openStageCorrection(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
+                        </div>
                       ) : (<>
                       <div className="flex min-w-[210px] flex-wrap gap-2">
                         <button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
@@ -1243,6 +1316,58 @@ export default function VaccinationValidationPage() {
               <button type="button" disabled={itemActionBusy || waitingBazarItems(itemActionRow).length === 0} onClick={() => void submitItemAction("DONE_ALL")} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Done All (item WAITING)</button>
             </div>
             {itemActionBusy ? <div className="mt-3 text-xs font-black text-slate-600">Memproses transaksi atomik; jangan klik berulang.</div> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {stageCorrectionRow ? (
+        <div className="fixed inset-0 z-[10070] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-label="Edit Stage Bazar per item">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="text-xs font-black uppercase text-blue-700">V624 · Edit Stage Bazar per produk/dosis</div>
+            <div className="mt-1 text-xl font-black">{stageCorrectionRow.patient_name || "Peserta"} · {stageCorrectionRow.queue_number || "-"}</div>
+            <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">
+              Pembayaran Bazar tetap tercatat. Status bayar dan status penyuntikan berbeda.
+              Jangan menandai vaksin belum disuntik bila pemberian vaksin benar-benar telah terjadi.
+            </div>
+            <label className="mt-4 grid gap-1 text-xs font-black text-slate-600">Jenis koreksi
+              <select className="rounded-xl border p-3 text-sm font-bold text-slate-900" value={stageCorrectionMode}
+                disabled={stageCorrectionBusy}
+                onChange={(e) => { setStageCorrectionMode(e.target.value as "MARK_PENDING_ONLY" | "CORRECT_NOT_INJECTED"); setStageCorrectionIds([]); setStageCorrectionConfirmed(false); }}>
+                <option value="MARK_PENDING_ONLY">Sudah bayar — belum suntik (belum ada record suntikan)</option>
+                <option value="CORRECT_NOT_INJECTED">Koreksi salah Done — seharusnya belum suntik (khusus Admin/Supervisor)</option>
+              </select>
+            </label>
+            <div className="mt-3 space-y-2">
+              {correctionEligibleItems(stageCorrectionRow, stageCorrectionMode).map((item) => {
+                const id = Number(item.item_id || 0);
+                return <label key={`v624-correct-${id}`} className="flex items-center gap-3 rounded-xl border p-3 text-sm">
+                  <input type="checkbox" disabled={stageCorrectionBusy} checked={stageCorrectionIds.includes(id)}
+                    onChange={(e) => setStageCorrectionIds((prev) => e.target.checked ? [...prev, id] : prev.filter((x) => x !== id))}/>
+                  <span className="min-w-0 flex-1"><span className="block font-black">{item.vaccine_name || "Vaksin"}</span>
+                    <span className="block text-xs text-slate-500">Item #{id} · Dosis {item.dose_number || 1} · Lot {item.lot_number || "-"} · {itemStatusLabel(item)}</span></span>
+                </label>;
+              })}
+              {!correctionEligibleItems(stageCorrectionRow, stageCorrectionMode).length
+                ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Tidak ada item yang memenuhi syarat koreksi ini. Perlu audit manual, jangan mengubah stok/record secara paksa.</div>
+                : null}
+            </div>
+            <label className="mt-4 block text-xs font-black text-slate-600">Alasan & hasil verifikasi (wajib, minimal 15 karakter)
+              <textarea className="mt-1 min-h-24 w-full rounded-xl border p-3 text-sm font-semibold" value={stageCorrectionNote}
+                disabled={stageCorrectionBusy} onChange={(e) => setStageCorrectionNote(e.target.value)}
+                placeholder="Contoh: pembayaran sudah lunas; dokter mengonfirmasi vaksin belum disuntik dan dijadwalkan ulang."/>
+            </label>
+            {stageCorrectionMode === "CORRECT_NOT_INJECTED" ? (
+              <label className="mt-3 flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-950">
+                <input type="checkbox" className="mt-1" disabled={stageCorrectionBusy} checked={stageCorrectionConfirmed}
+                  onChange={(e) => setStageCorrectionConfirmed(e.target.checked)}/>
+                <span>Saya sudah memverifikasi bersama petugas medis bahwa item terpilih BENAR-BENAR BELUM disuntik. Record akan VOIDED dengan audit dan pemakaian stok item tersebut dikoreksi. Vaksin lain dan pembayaran tetap.</span>
+              </label>
+            ) : <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold">Hanya menyelaraskan stage menjadi menunggu; tidak membuat/membatalkan record atau mengubah stok.</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" disabled={stageCorrectionBusy} onClick={() => setStageCorrectionRow(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Tutup</button>
+              <button type="button" disabled={stageCorrectionBusy || !stageCorrectionIds.length || clean(stageCorrectionNote).length < 15 || (stageCorrectionMode === "CORRECT_NOT_INJECTED" && !stageCorrectionConfirmed)}
+                onClick={() => void submitStageCorrection()} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-40">Simpan Koreksi Terpilih</button>
+            </div>
           </div>
         </div>
       ) : null}

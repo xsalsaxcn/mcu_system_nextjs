@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
-import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { canVaccinationAccess, vaccinationRole } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
 import { reverseQueueDoneTrack, syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
@@ -810,6 +810,54 @@ export async function POST(req: NextRequest) {
     }
 
     if (!rowId) return json({ ok: false, message: "ID peserta/registrasi tidak terbaca." }, 400);
+
+    // V624 — Edit Stage for paid Bazar items. The original Bazar DONE track is
+    // never reset wholesale; correction is item-specific, guarded, audited, atomic.
+    // A clinical reversal is strictly limited to vaccination admins/supervisors.
+    if (action === "V624_BAZAR_STAGE_CORRECTION") {
+      if (serviceMode !== "BAZAR") return json({ ok: false, message: "Hanya untuk Bazar." }, 400);
+      const stageAction = clean(body.stage_action).toUpperCase();
+      if (!["MARK_PENDING_ONLY", "CORRECT_NOT_INJECTED"].includes(stageAction)) {
+        return json({ ok: false, message: "Jenis koreksi stage tidak valid." }, 400);
+      }
+      const role = vaccinationRole(user);
+      const canCorrectClinical = ["admin", "vaccination_admin", "vaccination_supervisor"].includes(role);
+      if (stageAction === "CORRECT_NOT_INJECTED" && !canCorrectClinical) {
+        return json({ ok: false, message: "Koreksi record suntikan memerlukan Admin Vaksinasi atau Supervisor." }, 403);
+      }
+      const rawIds = body.item_ids;
+      if (!Array.isArray(rawIds) || rawIds.length < 1 || rawIds.length > 30) {
+        return json({ ok: false, message: "Pilih 1 sampai 30 item." }, 400);
+      }
+      const itemIds = rawIds.map((x: any) => toId(x));
+      if (itemIds.some((x: any) => x === null) || new Set(itemIds).size !== itemIds.length) {
+        return json({ ok: false, message: "Item duplikat atau tidak valid." }, 400);
+      }
+      if (note.length < 15 || note.length > 1000) {
+        return json({ ok: false, message: "Alasan koreksi wajib 15 sampai 1000 karakter." }, 400);
+      }
+      if (stageAction === "CORRECT_NOT_INJECTED" && body.clinically_confirmed_not_injected !== true) {
+        return json({ ok: false, message: "Konfirmasi bahwa vaksin belum diberikan secara fisik wajib." }, 400);
+      }
+      // Audit must bind to the authenticated account, never rely only on input text.
+      const authenticatedActor = clean((user as any)?.username || (user as any)?.email || (user as any)?.name || "") || actor;
+      const rpc = await supabase.rpc("vaccination_validation_bazar_stage_v624", {
+        p_registration_id: rowId, p_item_ids: itemIds, p_action: stageAction,
+        p_actor: authenticatedActor, p_reason: note,
+        p_confirmed_not_injected: stageAction === "CORRECT_NOT_INJECTED" && body.clinically_confirmed_not_injected === true,
+      });
+      if (rpc.error) {
+        const missing = ["PGRST202", "42883"].includes(clean(rpc.error.code).toUpperCase()) ||
+          /schema cache|could not find the function/i.test(clean(rpc.error.message));
+        return json({ ok: false, message: missing
+          ? "Migrasi V624 belum tersedia. Tidak ada perubahan yang disimpan."
+          : (rpc.error.message || "Koreksi stage ditolak; tidak ada pembaruan parsial.") }, missing ? 503 : 409);
+      }
+      return json({ ok: true, result: rpc.data,
+        message: stageAction === "CORRECT_NOT_INJECTED"
+          ? "Koreksi salah Done per item tercatat; stok dan riwayat diperbarui secara atomik. Pembayaran tetap."
+          : "Status Belum Suntik disinkronkan. Pembayaran dan stok tidak diubah." });
+    }
 
     // V623 — Dedicated per-item Bazar actions. No legacy Done/Move fallback.
     if (["V623_BAZAR_DONE_SELECTED", "V623_BAZAR_MOVE_CLINIC_SELECTED"].includes(action)) {
