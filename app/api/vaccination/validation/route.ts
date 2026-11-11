@@ -59,6 +59,9 @@ function productDetail(record: any) {
 
 function itemDetail(item: any) {
   return {
+    item_id: toId(item?.id),
+    moved_to_clinic: item?.v623_moved === true,
+    clinic_move_note: clean(item?.v623_move_note),
     record_id: toId(item?.administered_record_id),
     vaccine_id: toId(item?.vaccine_id),
     lot_id: toId(item?.lot_id),
@@ -68,7 +71,7 @@ function itemDetail(item: any) {
     administered_at: item?.administered_at || null,
     administered_by: "-",
     note: "",
-    status: clean(item?.status) || "ADMINISTERED",
+    status: item?.v623_moved === true ? "MOVED_TO_CLINIC" : (clean(item?.status) || "WAITING"),
     service_mode: clean(item?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
     sale_mode: clean(item?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
     package_dose_count: Math.max(1, Number(item?.package_dose_count || 1)),
@@ -140,6 +143,11 @@ function displayForService(
   const { healthdayQueueEnabled, bazarQueueEnabled } = queueFlags(row);
   const trackStatus = serviceTrackStatus(row, serviceMode);
   const done = isDoneTrackStatus(trackStatus);
+  const bazarItemStatus = serviceMode === "BAZAR" && Number(row.session_id) !== 177 && serviceItemProducts.length
+    ? (serviceItemProducts.every((item: any) =>
+        ["ADMINISTERED", "DONE", "FINISHED", "MOVED_TO_CLINIC"].includes(clean(item.status).toUpperCase()))
+      ? "DONE" : "PENDING")
+    : null;
   const serviceAdministeredAt = serviceItemProducts
     .map((item: any) => item?.administered_at)
     .filter(Boolean)
@@ -166,7 +174,7 @@ function displayForService(
       ? clean(row.status_note)
       : (row.cancelled_note || row.status_note || row.note || row.notes || row.payment_note || row.product_note || row.keterangan || ""),
     print_status: row.print_status || "NOT_PRINTED",
-    validation_status: done ? "DONE" : (isPendingTrackStatus(trackStatus) ? "PENDING" : trackStatus || "PENDING"),
+    validation_status: bazarItemStatus || (done ? "DONE" : (isPendingTrackStatus(trackStatus) ? "PENDING" : trackStatus || "PENDING")),
     validated_at: serviceAdministeredAt || (done ? row.validated_at : null) || null,
     validated_by: done ? clean(row.validated_by) : "",
     queue_status: trackStatus,
@@ -187,7 +195,7 @@ function displayLegacy(row: any, recordRows: any[] = [], itemRows: any[] = []) {
     ...displayed,
     row_key: `${row.id}:LEGACY`,
     payment_method: clean(row.payment_method),
-    validation_status: clean(row.validation_status) || displayed.validation_status,
+    validation_status: mode === "BAZAR" && Number(row.session_id) !== 177 && itemRows.some((item: any) => normalizeServiceMode(item?.service_mode) === "BAZAR") ? displayed.validation_status : (clean(row.validation_status) || displayed.validation_status),
     validated_at: row.validated_at || displayed.validated_at,
     validated_by: clean(row.validated_by) || displayed.validated_by,
   };
@@ -353,8 +361,28 @@ async function loadItemsForRegistrations(supabase: any, registrationIds: number[
 
   if (result.error) throw new Error(result.error.message);
 
+  // V623 additive read: if the migration is absent, legacy listing still works.
+  // The write RPC FAILS CLOSED when absent; missing schema never enables Done.
+  const moveMap = new Map<number, any>();
+  const moveRead = await supabase
+    .from("vaccination_validation_item_moves_v623")
+    .select("item_id,registration_id,destination,note,active")
+    .in("registration_id", registrationIds)
+    .eq("active", true);
+  if (!moveRead.error) {
+    for (const move of moveRead.data || []) moveMap.set(Number(move.item_id), move);
+  } else {
+    const code = clean(moveRead.error.code).toUpperCase();
+    const msg = clean(moveRead.error.message).toLowerCase();
+    if (!["42P01", "PGRST205"].includes(code) && !msg.includes("could not find the table")) {
+      throw new Error(moveRead.error.message || "Gagal membaca riwayat pindah Klinik.");
+    }
+  }
+
   const byRegistration = new Map<number, any[]>();
-  for (const item of result.data || []) {
+  for (const rawItem of result.data || []) {
+    const move = moveMap.get(Number(rawItem.id));
+    const item = { ...rawItem, v623_moved: Boolean(move), v623_move_note: move?.note || "" };
     const key = Number(item.registration_id);
     if (!byRegistration.has(key)) byRegistration.set(key, []);
     byRegistration.get(key)!.push(item);
@@ -556,7 +584,7 @@ export async function GET(req: NextRequest) {
           const validationStatus = clean(row.validation_status).toUpperCase();
           if (validationStatus !== "PENDING" && validationStatus !== "DONE") continue;
           const displayed = displayForService(row, serviceMode, recordRows, itemRows);
-          displayed.validation_status = validationStatus;
+          displayed.validation_status = (Number(row.session_id) !== 177 && itemRows.some((item: any) => normalizeServiceMode(item?.service_mode) === "BAZAR")) ? displayed.validation_status : validationStatus;
           displayed.validated_at = validationStatus === "DONE" ? row.validated_at : null;
           displayed.validated_by = validationStatus === "DONE" ? clean(row.validated_by) : "";
           rows.push(displayed);
@@ -783,6 +811,39 @@ export async function POST(req: NextRequest) {
 
     if (!rowId) return json({ ok: false, message: "ID peserta/registrasi tidak terbaca." }, 400);
 
+    // V623 — Dedicated per-item Bazar actions. No legacy Done/Move fallback.
+    if (["V623_BAZAR_DONE_SELECTED", "V623_BAZAR_MOVE_CLINIC_SELECTED"].includes(action)) {
+      if (serviceMode !== "BAZAR") {
+        return json({ ok: false, message: "V623 hanya menerima layanan BAZAR." }, 400);
+      }
+      const rawIds = body.item_ids;
+      if (!Array.isArray(rawIds) || !rawIds.length || rawIds.length > 50) {
+        return json({ ok: false, message: "Pilih 1 sampai 50 item vaksin." }, 400);
+      }
+      const itemIds = rawIds.map((value: any) => toId(value));
+      if (itemIds.some((value: any) => value === null) || new Set(itemIds).size !== itemIds.length) {
+        return json({ ok: false, message: "ID item tidak valid atau duplikat." }, 400);
+      }
+      if (action === "V623_BAZAR_DONE_SELECTED" && body.confirmation !== "ADMINISTERED_CONFIRMED") {
+        return json({ ok: false, message: "Konfirmasi tindakan vaksinasi diperlukan." }, 400);
+      }
+      const operation = action === "V623_BAZAR_DONE_SELECTED" ? "DONE_SELECTED" : "MOVE_CLINIC_SELECTED";
+      const rpcResult = await supabase.rpc("vaccination_validation_bazar_item_action_v623", {
+        p_registration_id: rowId, p_item_ids: itemIds, p_action: operation,
+        p_actor: actor, p_note: note,
+      });
+      if (rpcResult.error) {
+        const missingFunction = ["PGRST202", "42883"].includes(clean(rpcResult.error.code).toUpperCase()) ||
+          /schema cache|could not find the function/i.test(clean(rpcResult.error.message));
+        return json({ ok: false, message: missingFunction
+          ? "V623 belum aktif di database. Pasang migrasi SQL V623 dahulu; tidak ada tindakan yang dicatat."
+          : (rpcResult.error.message || "Aksi per item gagal; tidak ada transaksi parsial dari RPC V623.") },
+          missingFunction ? 503 : 409);
+      }
+      return json({ ok: true, result: rpcResult.data, message: operation === "DONE_SELECTED"
+        ? "Done item terpilih berhasil dicatat." : "Item terpilih dicatat untuk vaksinasi di Klinik." });
+    }
+
     const now = new Date().toISOString();
 
     // V148.6 recovery hanya membuat vaccination_records yang hilang untuk keperluan label.
@@ -802,13 +863,18 @@ export async function POST(req: NextRequest) {
 
       const itemsResult = await supabase
         .from("vaccination_registration_items")
-        .select("id,registration_id,vaccine_id,lot_id,dose_number,status,administered_record_id,administered_at,item_note,payment_note,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+        .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,item_note,payment_note,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
         .eq("registration_id", rowId)
         .eq("active", true)
         .order("id", { ascending: true });
 
       if (itemsResult.error) {
         return json({ ok: false, message: itemsResult.error.message || "Gagal membaca item vaksin." }, 500);
+      }
+
+      if (Number(registration.session_id) !== 177 && (itemsResult.data || []).some((item: any) => normalizeServiceMode(item.service_mode) === "BAZAR" &&
+        !["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase()))) {
+        return json({ ok: false, message: "Label Bazar yang belum disuntik tidak boleh menciptakan record ADMINISTERED. Gunakan Kelola Tindakan per item." }, 409);
       }
 
       const existingResult = await supabase
@@ -938,6 +1004,15 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, message: registrationStateResult.error?.message || "Registrasi tidak ditemukan." }, 404);
     }
     const registrationState = registrationStateResult.data;
+    if (Number(registrationState.session_id) !== 177 && ["SELESAI", "DONE", "VALIDATED", "CANCELLED", "CANCELED", "BATAL", "MOVE_TO_CLINIC", "SEND_TO_VALIDATION", "PENDING_VALIDATION"].includes(action)) {
+      const bazarCount = await supabase.from("vaccination_registration_items")
+        .select("id,status,administered_record_id")
+        .eq("registration_id", rowId).eq("service_mode", "BAZAR").eq("active", true);
+      if (bazarCount.error) return json({ ok: false, message: bazarCount.error.message }, 500);
+      if ((bazarCount.data || []).length > 1 || (bazarCount.data || []).some((item: any) => item.administered_record_id)) {
+        return json({ ok: false, message: "Transaksi Bazar multi-item / sudah ada suntikan. Gunakan Kelola Tindakan per item (V623); aksi layanan lama diblokir agar riwayat dan stok aman." }, 409);
+      }
+    }
 
     const sessionModeResult = await supabase
       .from("vaccination_sessions")

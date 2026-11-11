@@ -12,6 +12,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 type ProductDetail = {
+  item_id?: number | null;
+  moved_to_clinic?: boolean;
+  clinic_move_note?: string;
   record_id?: number | null;
   vaccine_id?: number | null;
   lot_id?: number | null;
@@ -115,6 +118,23 @@ function recordIds(row: Row) {
   return Array.from(new Set([...fromRow, ...fromProducts].map(Number).filter((id) => Number.isFinite(id) && id > 0)));
 }
 
+function isBazarItemRow(row: Row) {
+  return Number(row.session_id) !== 177 && clean(row.validation_service_mode).toUpperCase() === "BAZAR" && !row.move_only &&
+    (row.products || []).some((item) => Number(item.item_id || 0) > 0 && clean(item.service_mode).toUpperCase() === "BAZAR");
+}
+
+function waitingBazarItems(row: Row) {
+  return (row.products || []).filter((item) => Number(item.item_id || 0) > 0 &&
+    clean(item.service_mode).toUpperCase() === "BAZAR" &&
+    clean(item.status).toUpperCase() === "WAITING" && !item.moved_to_clinic);
+}
+
+function itemStatusLabel(item: ProductDetail) {
+  if (item.moved_to_clinic || clean(item.status).toUpperCase() === "MOVED_TO_CLINIC") return "Pindah Klinik (belum disuntik)";
+  if (["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase())) return "Sudah disuntik";
+  return "Belum disuntik";
+}
+
 function rowStateKey(row: Row) {
   return clean(row.row_key) || `${row.id}:${clean(row.validation_service_mode).toUpperCase() || "LEGACY"}`;
 }
@@ -188,7 +208,7 @@ function exportValidationRows(rows: Row[], label: string) {
   ];
   const body = rows.map((row) => {
     const products = (row.products || [])
-      .map((item) => `${clean(item.vaccine_name) || "Vaksin"} / Lot ${clean(item.lot_number) || "-"}`)
+      .map((item) => `${clean(item.vaccine_name) || "Vaksin"} / Lot ${clean(item.lot_number) || "-"} / Dosis ${Number(item.dose_number || 1)} / ${itemStatusLabel(item)}`)
       .join(" | ");
     const moved = moveInfo(row);
     const money = paymentSnapshot(row);
@@ -266,6 +286,10 @@ export default function VaccinationValidationPage() {
   const [moveVendorQueue, setMoveVendorQueue] = useState("");
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveFeedback, setMoveFeedback] = useState("");
+  const [itemActionRow, setItemActionRow] = useState<Row | null>(null);
+  const [itemActionSelected, setItemActionSelected] = useState<number[]>([]);
+  const [itemActionNote, setItemActionNote] = useState("Vaksin lanjutan direncanakan disuntik di Klinik.");
+  const [itemActionBusy, setItemActionBusy] = useState(false);
 
   async function loadRows() {
     setLoading(true);
@@ -415,6 +439,10 @@ export default function VaccinationValidationPage() {
   }
 
   async function update(row: Row, action: string, note?: string) {
+    if (isBazarItemRow(row) && ["DONE", "SELESAI", "VALIDATED", "BATAL", "CANCELLED", "MOVE_TO_CLINIC", "PENDING_VALIDATION"].includes(action)) {
+      setMessage("Untuk transaksi Bazar gunakan Kelola Tindakan per item. Tidak ada perubahan data.");
+      return;
+    }
     setMessage("Mengubah status...");
     try {
       const res = await fetch("/api/vaccination/validation", {
@@ -429,6 +457,56 @@ export default function VaccinationValidationPage() {
     } catch (error: any) {
       setMessage(error?.message || "Gagal update status.");
     }
+  }
+
+  function openItemActions(row: Row) {
+    setItemActionRow(row);
+    setItemActionSelected([]);
+    setItemActionNote("Vaksin lanjutan direncanakan disuntik di Klinik.");
+    setMessage("");
+  }
+
+  async function submitItemAction(operation: "DONE_SELECTED" | "DONE_ALL" | "MOVE_CLINIC_SELECTED") {
+    if (!itemActionRow || itemActionBusy) return;
+    const eligible = waitingBazarItems(itemActionRow);
+    const ids = operation === "DONE_ALL"
+      ? eligible.map((item) => Number(item.item_id))
+      : itemActionSelected.filter((id) => eligible.some((item) => Number(item.item_id) === id));
+    if (!ids.length) { setMessage("Tidak ada item WAITING yang dapat diproses."); return; }
+    if (operation === "MOVE_CLINIC_SELECTED" && clean(itemActionNote).length < 5) {
+      setMessage("Alasan pindah Klinik wajib diisi."); return;
+    }
+    const label = eligible.filter((item) => ids.includes(Number(item.item_id)))
+      .map((item) => `${item.vaccine_name || "Vaksin"} — dosis ${item.dose_number || 1}`).join("; ");
+    const done = operation !== "MOVE_CLINIC_SELECTED";
+    if (!window.confirm(done
+      ? `KONFIRMASI SUNTIKAN: benar-benar sudah diberikan saat ini?\n\n${label}\n\nSemua item terpilih diproses sekaligus; jangan pilih dosis mendatang.`
+      : `Pindahkan HANYA item berikut ke Klinik, tanpa catatan suntikan atau pengurangan stok?\n\n${label}`)) return;
+    setItemActionBusy(true);
+    setMessage(done ? "Memvalidasi Lot dan stok terpilih..." : "Mencatat pindah Klinik per item...");
+    try {
+      const res = await fetchWithTimeout("/api/vaccination/validation", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({
+          id: itemActionRow.id, service_mode: "BAZAR", actor, item_ids: ids,
+          action: done ? "V623_BAZAR_DONE_SELECTED" : "V623_BAZAR_MOVE_CLINIC_SELECTED",
+          confirmation: done ? "ADMINISTERED_CONFIRMED" : "",
+          note: done ? "Tindakan sudah dikonfirmasi oleh petugas" : clean(itemActionNote),
+        }),
+      }, 35000);
+      const output = await res.json().catch(() => ({}));
+      if (!res.ok || !output.ok) throw new Error(output.message || "Aksi per item gagal.");
+      setItemActionRow(null);
+      setItemActionSelected([]);
+      await loadRows();
+      setMessage(output.message || "Tindakan per item berhasil.");
+    } catch (error: any) {
+      await loadRows();
+      setItemActionRow(null);
+      setMessage(error?.name === "AbortError"
+        ? "Request timeout. Cek ulang status item & movement sebelum mencoba lagi, agar tidak double."
+        : (error?.message || "Gagal memproses item."));
+    } finally { setItemActionBusy(false); }
   }
 
   function openStageEdit(row: Row) {
@@ -596,13 +674,17 @@ export default function VaccinationValidationPage() {
   }
 
   function toggleAllPending() {
-    const keys = pendingShown.map(rowStateKey);
+    const keys = pendingShown.filter((row) => !isBazarItemRow(row)).map(rowStateKey);
     const allSelected = keys.length > 0 && keys.every((key) => selectedRows.includes(key));
     setSelectedRows(allSelected ? selectedRows.filter((key) => !keys.includes(key)) : Array.from(new Set([...selectedRows, ...keys])));
   }
 
   async function bulkUpdate(action: "DONE" | "BATAL") {
     const targets = pendingShown.filter((row) => selectedRows.includes(rowStateKey(row)));
+    if (targets.some(isBazarItemRow)) {
+      setMessage("Bulk Done/Cancel Bazar tidak diizinkan. Gunakan Kelola Tindakan per item agar stok & riwayat aman.");
+      return;
+    }
     if (!targets.length) {
       setMessage("Pilih minimal satu peserta terlebih dahulu.");
       return;
@@ -638,6 +720,10 @@ export default function VaccinationValidationPage() {
   }
 
   async function handlePrint(row: Row) {
+    if (isBazarItemRow(row) && waitingBazarItems(row).length && recordIds(row).length === 0) {
+      setMessage("Label untuk item belum disuntik tidak dapat membuat record ADMINISTERED. Selesaikan atau pindahkan tindakan per item dahulu.");
+      return;
+    }
     // Popup dibuka sinkron dari click agar Chrome tidak memblokir setelah request async.
     const printWindow = window.open("about:blank", "_blank", "width=520,height=720");
     if (!printWindow) {
@@ -694,6 +780,7 @@ export default function VaccinationValidationPage() {
   }
 
   async function saveStatus(row: Row) {
+    if (isBazarItemRow(row)) { setMessage("Gunakan Kelola Tindakan Bazar per item."); return; }
     const key = rowStateKey(row);
     const status = draft[key] || "";
     if (!status) {
@@ -867,7 +954,7 @@ export default function VaccinationValidationPage() {
             <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-12 px-4 py-3"><input aria-label="Pilih semua peserta" type="checkbox" checked={pendingShown.length > 0 && pendingShown.every((row) => selectedRows.includes(rowStateKey(row)))} onChange={toggleAllPending} /></th>
+                  <th className="w-12 px-4 py-3"><input aria-label="Pilih semua peserta" type="checkbox" checked={pendingShown.filter((row) => !isBazarItemRow(row)).length > 0 && pendingShown.filter((row) => !isBazarItemRow(row)).every((row) => selectedRows.includes(rowStateKey(row)))} onChange={toggleAllPending} /></th>
                   <th className="px-4 py-3">No. Antrean Vendor</th>
                   <th className="px-4 py-3">Peserta</th>
                   <th className="px-4 py-3">NIK Karyawan / BINUSIAN ID</th>
@@ -880,16 +967,19 @@ export default function VaccinationValidationPage() {
               <tbody className="divide-y">
                 {pendingShown.map((row) => (
                   <tr key={rowStateKey(row)} className="align-top hover:bg-slate-50">
-                    <td className="px-4 py-4"><input aria-label={`Pilih ${row.patient_name || "peserta"}`} type="checkbox" checked={selectedRows.includes(rowStateKey(row))} onChange={() => toggleSelected(row)} /></td>
+                    <td className="px-4 py-4"><input aria-label={`Pilih ${row.patient_name || "peserta"}`} type="checkbox" disabled={isBazarItemRow(row)} checked={selectedRows.includes(rowStateKey(row))} onChange={() => toggleSelected(row)} /></td>
                     <td className="px-4 py-4"><span className="rounded-xl bg-cyan-50 px-3 py-2 font-black text-cyan-800">{row.queue_number || "-"}</span></td>
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                     <td className="px-4 py-4">
-                      <div className="space-y-1">{(row.products || []).map((item, index) => <div key={`${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div>
+                      <div className="space-y-1">{(row.products || []).map((item, index) => <div key={`${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div>
                     </td>
                     <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
                     <td className="px-4 py-4"><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">{row.validation_status || row.queue_status || "PENDING"}</span></td>
                     <td className="px-4 py-4">
+                      {isBazarItemRow(row) ? (
+                        <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Kelola Tindakan</button>
+                      ) : (<>
                       <div className="flex min-w-[250px] flex-wrap gap-2">
                         <button type="button" onClick={() => void update(row, "DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
                         <button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
@@ -905,6 +995,7 @@ export default function VaccinationValidationPage() {
                           </div>
                         </div>
                       ) : null}
+                      </>)}
                     </td>
                   </tr>
                 ))}
@@ -946,12 +1037,15 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4"><span className="rounded-xl bg-slate-100 px-3 py-2 font-black text-slate-700">{row.queue_number || "-"}</span></td>
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
-                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div></td>
                     <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
                     <td className="px-4 py-4"><div className="font-bold">{fmtDate(row.validated_at) || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.validated_by || "-"}</td>
                     <td className="px-4 py-4"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai</span></td>
                     <td className="px-4 py-4">
+                      {isBazarItemRow(row) ? (
+                        <button type="button" onClick={() => openItemActions(row)} className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white">Detail Tindakan</button>
+                      ) : (<>
                       <div className="flex min-w-[210px] flex-wrap gap-2">
                         <button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
                         <button type="button" onClick={() => openMove(row)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Pindah Lokasi</button>
@@ -963,6 +1057,7 @@ export default function VaccinationValidationPage() {
                           <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setCancelRowId(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-black">Tutup</button><button type="button" onClick={() => { if (!clean(notes[rowStateKey(row)])) { setMessage("Alasan Cancel wajib diisi."); return; } void update(row, "BATAL", notes[rowStateKey(row)]); setCancelRowId(null); }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white">Simpan Cancel</button></div>
                         </div>
                       ) : null}
+                      </>)}
                     </td>
                   </tr>
                 ))}
@@ -987,7 +1082,7 @@ export default function VaccinationValidationPage() {
                 {movedShown.map((row) => <tr key={`moved-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
                   <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
                   <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
-                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`moved-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`moved-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div></td>
                   <td className="px-4 py-4"><div className="font-bold">{row.location || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.session_name || "-"}</div></td>
                   <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">{row.note || "Riwayat pindah lokasi"}</div></td>
                   <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
@@ -1013,7 +1108,7 @@ export default function VaccinationValidationPage() {
                 {cancelledShown.map((row) => <tr key={`cancel-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
                   <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
                   <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
-                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`cancel-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`cancel-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"} · Dosis {item.dose_number || 1} · {itemStatusLabel(item)}</div>)}</div></td>
                   <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
                   <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">{row.note || "-"}</div></td>
                   <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
@@ -1112,6 +1207,46 @@ export default function VaccinationValidationPage() {
         </div>
       </section>
       )}
+      {itemActionRow ? (
+        <div className="fixed inset-0 z-[10060] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Kelola tindakan vaksin Bazar">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="text-xs font-black uppercase text-cyan-700">V623 · Validasi Bazar per item</div>
+            <div className="mt-1 text-xl font-black">{itemActionRow.patient_name || "Peserta"} · {itemActionRow.queue_number || "-"}</div>
+            <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-950">
+              Centang hanya dosis yang benar-benar akan diproses. Paket beberapa dosis BUKAN bukti beberapa suntikan sudah diberikan.
+              Transaksi pembayaran tetap satu. Tindakan yang sudah memiliki record tidak bisa dicatat ulang.
+            </div>
+            <div className="mt-4 space-y-2">
+              {(itemActionRow.products || []).filter((item) => clean(item.service_mode).toUpperCase() === "BAZAR").map((item) => {
+                const itemId = Number(item.item_id || 0);
+                const eligible = waitingBazarItems(itemActionRow).some((candidate) => Number(candidate.item_id) === itemId);
+                return (
+                  <label key={`v623-${itemId}`} className={`flex items-start gap-3 rounded-2xl border p-3 ${eligible ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}>
+                    <input type="checkbox" className="mt-1" disabled={!eligible || itemActionBusy} checked={eligible && itemActionSelected.includes(itemId)} onChange={(e) => setItemActionSelected((prior) => e.target.checked ? [...prior, itemId] : prior.filter((id) => id !== itemId))} />
+                    <span className="min-w-0 flex-1 text-sm">
+                      <span className="block font-black">{item.vaccine_name || "Vaksin"}</span>
+                      <span className="block text-xs font-semibold text-slate-500">Item #{itemId} · Dosis {item.dose_number || 1} · Lot {item.lot_number || "-"}</span>
+                      <span className={`block pt-1 text-xs font-black ${eligible ? "text-amber-700" : "text-slate-600"}`}>{itemStatusLabel(item)}{item.moved_to_clinic && item.clinic_move_note ? ` · ${item.clinic_move_note}` : ""}</span>
+                      {Number(item.package_dose_count || 1) > 1 ? <span className="block pt-1 text-xs text-violet-700">Paket {item.package_dose_count} dosis dibeli; item ini mewakili dosis {item.dose_number || 1}, bukan otomatis semua dosis.</span> : null}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <label className="mt-4 block text-xs font-black text-slate-600">Alasan / rencana untuk Pindah Klinik
+              <textarea className="mt-1 min-h-20 w-full rounded-xl border p-3 text-sm font-semibold" value={itemActionNote} disabled={itemActionBusy} onChange={(e) => setItemActionNote(e.target.value)} placeholder="Tuliskan rencana suntik lanjutan di Klinik" />
+            </label>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={itemActionBusy} onClick={() => setItemActionRow(null)} className="rounded-xl border px-3 py-2 text-xs font-black">Tutup</button>
+              <button type="button" disabled={itemActionBusy || !itemActionSelected.length} onClick={() => void submitItemAction("MOVE_CLINIC_SELECTED")} className="rounded-xl border border-blue-400 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 disabled:opacity-40">Pindah Klinik Terpilih</button>
+              <button type="button" disabled={itemActionBusy || !itemActionSelected.length} onClick={() => void submitItemAction("DONE_SELECTED")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Done Terpilih</button>
+              <button type="button" disabled={itemActionBusy || waitingBazarItems(itemActionRow).length === 0} onClick={() => void submitItemAction("DONE_ALL")} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Done All (item WAITING)</button>
+            </div>
+            {itemActionBusy ? <div className="mt-3 text-xs font-black text-slate-600">Memproses transaksi atomik; jangan klik berulang.</div> : null}
+          </div>
+        </div>
+      ) : null}
+
       {editingStageRow ? (
         <div className="fixed inset-0 z-[10040] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingStageRow(null); }}>
           <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl">
