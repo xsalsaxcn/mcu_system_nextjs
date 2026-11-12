@@ -13,7 +13,7 @@ import { fail, ok, requireUser, supabaseAdmin } from "../_utils";
 // Does not write registrations, queue, validation, stock, movement or history services.
 export const dynamic = "force-dynamic";
 
-type Choice = { historyPersonId?: unknown; participantId?: unknown; name?: unknown };
+type Choice = { historyPersonId?: unknown; participantId?: unknown; registrationId?: unknown; name?: unknown };
 type Role = "PARENT" | "DEPENDENT";
 
 function positiveId(value: unknown) {
@@ -66,8 +66,9 @@ function throwIfError(result: any) {
 async function resolveSelection(supabase: any, company: any, choice: Choice, role: Role) {
   const historyId = positiveId(choice?.historyPersonId);
   const participantId = positiveId(choice?.participantId);
+  const registrationId = positiveId(choice?.registrationId);
   const assertedName = historyNameKey(choice?.name);
-  if ((!historyId && !participantId) || !assertedName) {
+  if ((!historyId && !participantId && !registrationId) || !assertedName) {
     throw new Error("Pilih profil existing dari hasil pencarian; nama dan ID internal wajib ada.");
   }
 
@@ -94,6 +95,37 @@ async function resolveSelection(supabase: any, company: any, choice: Choice, rol
     }
   }
 
+  // New Bazar participant may not yet have a participants/vaccination_persons row.
+  // Resolve only an EXACT selected registration and confirm its Session company.
+  let registrationIdentityRow: any = null;
+  if (registrationId) {
+    const registration = throwIfError(await supabase
+      .from("vaccination_registrations")
+      .select("*,session:vaccination_sessions(id,company_name)")
+      .eq("id", registrationId).maybeSingle());
+    if (!registration) throw new Error("Registrasi calon anggota keluarga tidak ditemukan.");
+    const session = Array.isArray(registration.session) ? registration.session[0] : registration.session;
+    if (historyCompanyKey(session?.company_name) !== company.company_key) {
+      throw new Error("Registrasi kandidat bukan dari perusahaan yang dipilih.");
+    }
+    const regName = historyNameKey(registration.participant_name);
+    if (!regName || regName !== assertedName) {
+      throw new Error("Nama pada registrasi telah berubah. Cari ulang calon anggota keluarga.");
+    }
+    const regRole = historyText(registration.family_role).toUpperCase();
+    if (role === "PARENT" && ["DEPENDENT", "CHILD", "FAMILY"].includes(regRole)) {
+      throw new Error("Registrasi ini berstatus Child, bukan Parent.");
+    }
+    registrationIdentityRow = {
+      name: registration.participant_name,
+      employeeId: registration.employee_id,
+      nik: registration.nik,
+      email: registration.email,
+      phone: registration.phone,
+      birthDate: registration.birth_date || null,
+    };
+  }
+
   let person: any = null;
   if (historyId) {
     person = throwIfError(await supabase
@@ -106,7 +138,7 @@ async function resolveSelection(supabase: any, company: any, choice: Choice, rol
     if (!person) throw new Error("Profil History tidak ditemukan pada perusahaan yang dipilih.");
   }
 
-  const operationalRow = operational ? operationalIdentity(operational) : null;
+  const operationalRow = operational ? operationalIdentity(operational) : registrationIdentityRow;
   if (person && operationalRow && !sameIdentity(historyIdentity(person), operationalRow)) {
     throw new Error("ID Database dan ID History tidak terbukti milik orang yang sama. Periksa profilnya.");
   }

@@ -99,6 +99,8 @@ export default function VaccinationMasterPage() {
   const [companySources, setCompanySources] = useState<any[]>([]);
   const [stockSessions, setStockSessions] = useState<any[]>([]);
   const [serviceStockAllocations, setServiceStockAllocations] = useState<any[]>([]);
+  const [serviceStockUsageRows, setServiceStockUsageRows] = useState<any[]>([]);
+  const [serviceStockUsageReady, setServiceStockUsageReady] = useState(false);
   const [sessionProductAssignments, setSessionProductAssignments] = useState<any[]>([]);
   const [sessionProductAssignmentReady, setSessionProductAssignmentReady] = useState(true);
   const [sessionProductAssignmentMessage, setSessionProductAssignmentMessage] = useState("");
@@ -230,12 +232,15 @@ export default function VaccinationMasterPage() {
   }
 
   async function loadData() {
-    const [masterJson, sourcesJson, pricingJson] = await Promise.all([
+    const [masterJson, sourcesJson, pricingJson, usageJson] = await Promise.all([
       fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/sources?program=vaccination", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, sources: [] })),
       fetch("/api/vaccination/pricing", { cache: "no-store" })
         .then((r) => r.json())
         .catch(() => ({ ok: false, offers: [] })),
+      fetch("/api/vaccination/stock-allocations", { cache: "no-store" })
+        .then((r) => r.json())
+        .catch(() => ({ ok: false, rows: [] })),
     ]);
     if (!masterJson.ok) {
       setError(masterJson.message || "Gagal mengambil data.");
@@ -247,6 +252,8 @@ export default function VaccinationMasterPage() {
     setCompanySources(sourcesJson.ok ? sourcesJson.sources || [] : []);
     setStockSessions(masterJson.stockSessions || []);
     setServiceStockAllocations(masterJson.serviceStockAllocations || []);
+    setServiceStockUsageRows(usageJson?.ok ? usageJson.rows || [] : []);
+    setServiceStockUsageReady(usageJson?.ok === true);
     setSessionProductAssignments(masterJson.sessionProductAssignments || []);
     setSessionProductAssignmentReady(masterJson.sessionProductAssignmentReady !== false);
     setSessionProductAssignmentMessage(masterJson.sessionProductAssignmentMessage || "");
@@ -1131,6 +1138,10 @@ export default function VaccinationMasterPage() {
       return;
     }
 
+    if (!serviceStockUsageReady || !selectedServiceStockUsageVerified) {
+      setError("Data pemakaian per layanan belum tervalidasi. Refresh Master dan periksa Lot sebelum menyimpan.");
+      return;
+    }
     const qty = Math.max(0, Math.min(selectedServiceStockMaxQty, Number(serviceStockEditorQty || 0)));
     const healthdayQty =
       serviceStockEditorMode === "HEALTHDAY" ? qty : selectedServiceStockHealthday;
@@ -1662,9 +1673,29 @@ export default function VaccinationMasterPage() {
       ? selectedServiceStockBazar
       : selectedServiceStockHealthday;
 
+  // V627: the editor sets TOTAL lifetime service quota, not only physical stock left.
+  // Already administered items consume prior quota but must not prevent allocating newly arrived stock.
+  const serviceUsed = (mode: "HEALTHDAY" | "BAZAR") => {
+    const row = serviceStockUsageRows.find((item) =>
+      item.active !== false && Number(item.lot_id || 0) === Number(selectedServiceStockLot?.id || 0) &&
+      Number(item.session_id || 0) === Number(lotForm.stockSessionId || 0) &&
+      String(item.service_mode || "").toUpperCase() === mode
+    );
+    return Math.max(0, Number(row?.used_qty || 0));
+  };
+  const selectedServiceStockUsedHealthday = serviceUsed("HEALTHDAY");
+  const selectedServiceStockUsedBazar = serviceUsed("BAZAR");
+  const selectedServiceStockUsageVerified = serviceStockUsageReady && !!selectedServiceStockLot &&
+    (selectedServiceStockUsedHealthday + selectedServiceStockUsedBazar) <= Number(selectedServiceStockLot.stock_used || 0) &&
+    Number(lotForm.stockSessionId || 0) !== 177;
+  const selectedServiceStockUsedCurrent = serviceStockEditorMode === "BAZAR"
+    ? selectedServiceStockUsedBazar : selectedServiceStockUsedHealthday;
+  const selectedServiceStockUsedOther = serviceStockEditorMode === "BAZAR"
+    ? selectedServiceStockUsedHealthday : selectedServiceStockUsedBazar;
+  const selectedServiceStockOtherOpen = Math.max(0, selectedServiceStockOtherQty - selectedServiceStockUsedOther);
   const selectedServiceStockMaxQty = Math.max(
     0,
-    selectedServiceStockRemaining - selectedServiceStockOtherQty,
+    selectedServiceStockUsedCurrent + selectedServiceStockRemaining - selectedServiceStockOtherOpen,
   );
 
   const transferRemaining = transferLot
@@ -3337,11 +3368,19 @@ export default function VaccinationMasterPage() {
                         <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
                           <div className="text-[11px] font-bold uppercase text-emerald-600">Belum Dialokasikan</div>
                           <div className="mt-1 text-sm font-black text-emerald-900">
-                            {Math.max(0, selectedServiceStockRemaining - selectedServiceStockHealthday - selectedServiceStockBazar)}
+                            {Math.max(0, selectedServiceStockRemaining -
+                              Math.max(0, selectedServiceStockHealthday - selectedServiceStockUsedHealthday) -
+                              Math.max(0, selectedServiceStockBazar - selectedServiceStockUsedBazar))}
                           </div>
                         </div>
                       </div>
 
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                        Alokasi adalah kuota TOTAL (termasuk dosis yang sudah diberikan), bukan hanya stok sisa.
+                        Terpakai dari alokasi: Healthday {selectedServiceStockUsedHealthday}, Bazar {selectedServiceStockUsedBazar}.
+                        Sisa fisik {selectedServiceStockRemaining} tidak berubah saat kuota disimpan.
+                        {!selectedServiceStockUsageVerified ? " Data pemakaian belum terverifikasi; simpan ditahan." : ""}
+                      </div>
                       <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-3">
                         <div className="min-w-[220px] flex-1">
                           <div className="text-xs font-bold text-slate-600">
@@ -3381,7 +3420,7 @@ export default function VaccinationMasterPage() {
 
                         <button
                           type="button"
-                          disabled={savingServiceStock || !serviceStockReady}
+                          disabled={savingServiceStock || !serviceStockReady || !selectedServiceStockUsageVerified}
                           onClick={saveSelectedServiceStock}
                           className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-bold text-white disabled:opacity-50"
                         >

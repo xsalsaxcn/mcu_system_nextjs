@@ -1648,16 +1648,49 @@ export async function POST(req: NextRequest) {
       return fail("Lot harus memiliki Scope Stok = Session/Lokasi yang sama sebelum pembagian Healthday/Bazar disimpan.", 409);
     }
 
-    const globalRemaining = Math.max(
-      0,
-      Number(lot.stock_initial || 0) +
-        Number(lot.stock_added || 0) -
-        Number(lot.stock_used || 0),
-    );
-    const requestedTotal = healthdayQty + bazarQty;
-    if (requestedTotal > globalRemaining) {
+    // V627: quantities represent the TOTAL allocated doses for the lifetime of this Lot+Session.
+    // Only (allocated - actually administered) reserves physical stock for future injections.
+    // Source-of-truth used doses remain the existing clinical items; never edit stock_used here.
+    if (Number(sessionId) === 177) return fail("LKG iServe Session 177 dikunci dari penyesuaian alokasi V627.", 409);
+    const allAllocations = await supabase.from("vaccination_session_stock_allocations")
+      .select("id,session_id,lot_id,service_mode,allocated_qty,active")
+      .eq("lot_id", lotId).eq("active", true).limit(100);
+    if (allAllocations.error) return fail("Gagal memverifikasi alokasi aktif: " + allAllocations.error.message, 503);
+    if ((allAllocations.data || []).length >= 100) return fail("Terlalu banyak alokasi pada Lot; perubahan ditahan.", 409);
+    if ((allAllocations.data || []).some((r: any) => Number(r.session_id) !== sessionId)) {
+      return fail("Lot memiliki alokasi pada Session lain. Audit terlebih dahulu.", 409);
+    }
+    const clinical = await supabase.from("vaccination_registration_items")
+      .select("id,status,service_mode,registration:vaccination_registrations!inner(session_id)")
+      .eq("lot_id", lotId).eq("active", true)
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
+      .eq("registration.session_id", sessionId).limit(20000);
+    if (clinical.error) return fail("Audit dosis yang telah diberikan gagal: " + clinical.error.message, 503);
+    if ((clinical.data || []).length >= 20000) return fail("Pemakaian dosis melampaui batas audit, alokasi ditahan.", 409);
+    let usedHD = 0;
+    let usedBazar = 0;
+    for (const item of clinical.data || []) {
+      const mode = String((item as any).service_mode || "").toUpperCase();
+      if (mode === "HEALTHDAY") usedHD++;
+      else if (mode === "BAZAR") usedBazar++;
+      else return fail("Ada layanan suntikan tidak dikenal. Alokasi ditahan.", 409);
+    }
+    const usedRecorded = Number(lot.stock_used || 0);
+    if (usedHD + usedBazar > usedRecorded) {
+      return fail("Pencatatan pemakaian Lot tidak konsisten dengan item klinis. Audit Inventory terlebih dahulu.", 409);
+    }
+    if (healthdayQty < usedHD || bazarQty < usedBazar) {
+      return fail(`Kuota total tidak boleh lebih kecil dari dosis yang sudah disuntik: Healthday ${usedHD}, Bazar ${usedBazar}.`, 409);
+    }
+    const physicalRemaining = Number(lot.stock_initial || 0) +
+      Number(lot.stock_added || 0) - usedRecorded;
+    if (!Number.isSafeInteger(physicalRemaining) || physicalRemaining < 0) {
+      return fail("Sisa stok fisik Lot tidak valid. Audit Inventory sebelum menambah kuota.", 409);
+    }
+    const newlyReserved = (healthdayQty - usedHD) + (bazarQty - usedBazar);
+    if (newlyReserved > physicalRemaining) {
       return fail(
-        `Total stok Healthday + Bazar (${requestedTotal}) melebihi sisa stok Lot ${lot.lot_number} (${globalRemaining}).`,
+        `Sisa kuota yang dipesan (${newlyReserved}) melampaui stok fisik tersedia (${physicalRemaining}). Dosis terpakai Healthday ${usedHD}, Bazar ${usedBazar}.`,
         409,
       );
     }
@@ -1711,9 +1744,9 @@ export async function POST(req: NextRequest) {
     }
 
     return ok({
-      message: `Pembagian stok Lot ${lot.lot_number} disimpan: Healthday ${healthdayQty}, Bazar ${bazarQty}, belum dialokasikan ${Math.max(0, globalRemaining - requestedTotal)}.`,
+      message: `Kuota total Lot ${lot.lot_number} disimpan: Healthday ${healthdayQty} (terpakai ${usedHD}), Bazar ${bazarQty} (terpakai ${usedBazar}), sisa fisik belum dipesan ${Math.max(0, physicalRemaining - newlyReserved)}.`,
       allocations: allocationResult.data || [],
-      remainingUnallocated: Math.max(0, globalRemaining - requestedTotal),
+      remainingUnallocated: Math.max(0, physicalRemaining - newlyReserved),
     });
   }
 

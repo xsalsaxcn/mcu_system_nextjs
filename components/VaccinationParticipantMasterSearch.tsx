@@ -153,6 +153,14 @@ export default function VaccinationParticipantMasterSearch({
   const [sameEmployeeError, setSameEmployeeError] = useState("");
   const [familySearching, setFamilySearching] = useState(false);
   const [familySaving, setFamilySaving] = useState(false);
+  // V627: explicit audited identity edits; never edit a relationship by changing shared BINUSIAN ID.
+  const [familyRefresh, setFamilyRefresh] = useState(0);
+  const [identityEditor, setIdentityEditor] = useState<any>(null);
+  const [identityDraft, setIdentityDraft] = useState<any>({});
+  const [identityReason, setIdentityReason] = useState("");
+  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [identityError, setIdentityError] = useState("");
   const [familyError, setFamilyError] = useState("");
   const [familySuccess, setFamilySuccess] = useState("");
   // V583: independent, read-only Family verifier. Never writes registrations.
@@ -163,7 +171,7 @@ export default function VaccinationParticipantMasterSearch({
   const familyContextHistoryId = Number(pending?.context?.historyPerson?.id || familyContextRow?.historyPersonId || familyContextRow?.history_person_id || 0);
   const familyContextParticipantId = Number(familyContextRow?.participantId || familyContextRow?.participant_id || 0);
   const familyContextName = clean(pending?.context?.historyPerson?.name || familyContextRow?.name || familyContextRow?.participant_name);
-  const familyVerificationKey = [companyKey, familyContextHistoryId, familyContextParticipantId, normalized(familyContextName)].join("|");
+  const familyVerificationKey = [companyKey, familyContextHistoryId, familyContextParticipantId, normalized(familyContextName), familyRefresh].join("|");
   const familyStatus = verifiedFamily?.key === familyVerificationKey ? verifiedFamily : null;
   const familyVerifyError = clean(familyStatus?.error);
 
@@ -309,7 +317,7 @@ export default function VaccinationParticipantMasterSearch({
       setFamilySearching(true);
       setFamilyError("");
       try {
-        const params = new URLSearchParams({ company_key: companyKey, q: familySearch.trim() });
+        const params = new URLSearchParams({ company_key: companyKey, q: familySearch.trim(), include_registrations: "1" });
         const response = await fetch(`/api/vaccination/register-master-search?${params}`, { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.ok === false) {
@@ -593,6 +601,61 @@ export default function VaccinationParticipantMasterSearch({
     });
   }
 
+  async function openIdentityEditor(row: any, fallbackRegistrationId?: number) {
+    const historyId = Number(row?.historyPersonId || row?.id || 0);
+    const registrationId = Number(row?.registrationId || fallbackRegistrationId || 0);
+    if (!historyId && !registrationId) {
+      setFamilyError("Data ini belum memiliki ID profil/registrasi terverifikasi. Hubungkan profilnya terlebih dahulu.");
+      return;
+    }
+    const targetKind = historyId ? "PERSON" : "REGISTRATION";
+    const targetId = historyId || registrationId;
+    setIdentityLoading(true);
+    setIdentityError("");
+    try {
+      const params = new URLSearchParams({ company_key: companyKey, kind: targetKind, id: String(targetId) });
+      const response = await fetch(`/api/vaccination/family-identity-edit?${params}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false || !payload.identity?.name) {
+        throw new Error(payload?.message || "Profil belum dapat diverifikasi untuk diedit.");
+      }
+      setIdentityEditor({ targetKind, targetId, expectedName: clean(payload.identity.name) });
+      setIdentityDraft(payload.identity);
+      setIdentityReason("");
+      setFamilyError("");
+    } catch (error: any) {
+      setFamilyError(String(error?.message || "Gagal membuka profil untuk koreksi."));
+    } finally { setIdentityLoading(false); }
+  }
+
+  async function saveIdentityEdit() {
+    if (!identityEditor || identitySaving) return;
+    if (!clean(identityReason) || clean(identityReason).length < 8) {
+      setIdentityError("Alasan koreksi wajib dijelaskan (minimal 8 karakter).");
+      return;
+    }
+    setIdentitySaving(true);
+    setIdentityError("");
+    try {
+      const response = await fetch("/api/vaccination/family-identity-edit", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyKey, ...identityEditor, values: identityDraft, reason: identityReason }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+      const editWasCurrent = Number(identityEditor.targetId) === Number(context?.historyPerson?.id || 0) ||
+        (identityEditor.targetKind === "REGISTRATION" && Number(identityEditor.targetId) === Number(context?.currentRegistration?.id || 0));
+      setIdentityEditor(null);
+      setFamilySuccess("Koreksi identitas tersimpan dengan jejak audit. Data klinis dan transaksi tidak berubah.");
+      setFamilyRefresh((v) => v + 1);
+      if (editWasCurrent && pending?.row) {
+        await loadParticipantContext({ ...pending.row, name: identityDraft.name, participant_name: identityDraft.name,
+          employeeId: identityDraft.employeeId, nik: identityDraft.nik, email: identityDraft.email, phone: identityDraft.phone });
+      }
+    } catch (error: any) { setIdentityError(String(error?.message || "Gagal mengubah identitas.")); }
+    finally { setIdentitySaving(false); }
+  }
+
   function openFamilyBinding() {
     setFamilySelectedRole(
       String(familyStatus?.family?.role || pending?.row?.participantType || "").toUpperCase() === "DEPENDENT"
@@ -612,11 +675,13 @@ export default function VaccinationParticipantMasterSearch({
     const selectedChoice = {
       historyPersonId: Number(context?.historyPerson?.id || selectedPerson?.historyPersonId || 0) || null,
       participantId: Number(selectedPerson?.participantId || selectedPerson?.participant_id || 0) || null,
+      registrationId: Number(selectedPerson?.registrationId || selectedPerson?.registration_id || context?.currentRegistration?.id || 0) || null,
       name: clean(context?.historyPerson?.name || selectedPerson?.name || selectedPerson?.participant_name),
     };
     const otherChoice = {
       historyPersonId: Number(familyParent.historyPersonId || 0) || null,
       participantId: Number(familyParent.participantId || 0) || null,
+      registrationId: Number(familyParent.registrationId || 0) || null,
       name: clean(familyParent.name),
     };
     setFamilySaving(true);
@@ -1300,7 +1365,14 @@ export default function VaccinationParticipantMasterSearch({
                     ["Perusahaan", contextCompany || "-"],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border bg-white p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+                        <button type="button" disabled={identitySaving || !(currentFamilyHistoryId || current?.id || other?.id)}
+                          onClick={() => openIdentityEditor({ ...contextPerson, historyPersonId: currentFamilyHistoryId }, Number(current?.id || other?.id || 0))}
+                          className="text-[10px] font-black text-blue-700 underline disabled:opacity-30" title="Edit data identitas peserta ini">
+                          Edit
+                        </button>
+                      </div>
                       <div className="mt-1 break-words text-sm font-black text-slate-900">{value}</div>
                     </div>
                   ))}
@@ -1310,6 +1382,7 @@ export default function VaccinationParticipantMasterSearch({
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Parent</div>
                     {family?.parent ? (
+                      <>
                       <button
                         type="button"
                         onClick={() => openRelatedPerson(family.parent, "Parent")}
@@ -1323,6 +1396,10 @@ export default function VaccinationParticipantMasterSearch({
                         </div>
                         <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-blue-600">Klik lihat data</div>
                       </button>
+                      <button type="button" onClick={() => openIdentityEditor({ ...family.parent, historyPersonId: family.parent.id })}
+                        disabled={identitySaving || !Number(family.parent.id || 0)}
+                        className="mt-2 text-xs font-bold text-blue-700 underline disabled:opacity-30">Edit Identitas Parent</button>
+                      </>
                     ) : (
                       <div className="mt-1 text-sm font-semibold text-slate-500">
                         {String(family?.role || contextPerson?.participantType || "").toUpperCase() === "DEPENDENT" ? "Parent belum terhubung" : "Peserta adalah Parent / tidak ada Parent"}
@@ -1334,6 +1411,7 @@ export default function VaccinationParticipantMasterSearch({
                     {familyDisplayRows.length ? (
                       <div className="mt-2 space-y-2">
                         {familyDisplayRows.map((member: any) => (
+                          <div key={member.id || `${member.name}-${member.nik}`}>
                           <button
                             type="button"
                             key={member.id || `${member.name}-${member.nik}`}
@@ -1350,6 +1428,10 @@ export default function VaccinationParticipantMasterSearch({
                             </div>
                             <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-violet-600">Klik lihat data</div>
                           </button>
+                          <button type="button" onClick={() => openIdentityEditor({ ...member, historyPersonId: member.id })}
+                            disabled={identitySaving || !Number(member.id || 0)}
+                            className="mt-1 text-xs font-bold text-blue-700 underline disabled:opacity-30">Edit Identitas {member.relationshipLabel || "Child"}</button>
+                          </div>
                         ))}
                       </div>
                     ) : (
@@ -1419,7 +1501,7 @@ export default function VaccinationParticipantMasterSearch({
                             Number(row?.participantId || 0) && Number(row?.participantId || 0) === Number(pending?.row?.participantId || pending?.row?.participant_id || 0)
                           )).map((row: any) => (
                             <button
-                              key={`family-parent-${row.sourceType}-${row.historyPersonId || 0}-${row.participantId || 0}`}
+                              key={`family-parent-${row.sourceType}-${row.historyPersonId || 0}-${row.participantId || 0}-${row.registrationId || 0}`}
                               type="button"
                               disabled={familySaving}
                               onClick={() => setFamilyParent(row)}
@@ -1448,6 +1530,41 @@ export default function VaccinationParticipantMasterSearch({
                       </div>
                     </div>
                   )}
+                </section>
+              ) : null}
+
+              {identityLoading ? <div className="rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-800">Memverifikasi profil identitas...</div> : null}
+              {identityEditor ? (
+                <section className="rounded-2xl border-2 border-blue-300 bg-blue-50 p-4" aria-label="Edit Identitas Terjaga">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-black text-blue-900">Edit Identitas · Profil {identityEditor.targetKind === "PERSON" ? "Family" : "Registrasi"} #{identityEditor.targetId}</div>
+                    <button type="button" disabled={identitySaving} onClick={() => setIdentityEditor(null)} className="rounded-lg border bg-white px-2 py-1 text-xs">Batal</button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-700">Hanya identitas profil ini yang diperbarui. Perubahan wajib menyimpan alasan; data suntikan, antrean, harga dan pembayaran tidak diubah.</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {[
+                      ["name", "Nama"], ["employeeId", "BINUSIAN ID / NIK Karyawan"], ["nik", "NIK KTP"],
+                      ["phone", "Nomor HP"], ["email", "Email"],
+                      ...(identityEditor.targetKind === "PERSON" ? [["birthDate", "Tanggal Lahir (YYYY-MM-DD)"], ["gender", "Jenis Kelamin (M/F)"]] : []),
+                    ].map(([field, label]) => (
+                      <label key={field} className="text-xs font-bold text-slate-700">{label}
+                        <input className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                          value={String(identityDraft[field] || "")}
+                          onChange={(e) => setIdentityDraft((previous: any) => ({ ...previous, [field]: e.target.value }))}
+                          disabled={identitySaving} />
+                      </label>
+                    ))}
+                  </div>
+                  <label className="mt-3 block text-xs font-bold text-slate-700">Alasan koreksi (wajib)
+                    <textarea className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm" rows={2}
+                      value={identityReason} onChange={(e) => setIdentityReason(e.target.value)} disabled={identitySaving}
+                      placeholder="Contoh: Koreksi salah ketik sesuai identitas peserta" />
+                  </label>
+                  {identityError ? <div role="alert" className="mt-2 rounded-lg bg-rose-50 p-2 text-xs font-bold text-rose-800">{identityError}</div> : null}
+                  <button type="button" onClick={() => void saveIdentityEdit()} disabled={identitySaving}
+                    className="mt-3 rounded-lg bg-blue-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
+                    {identitySaving ? "Menyimpan..." : "Simpan Koreksi Identitas"}
+                  </button>
                 </section>
               ) : null}
 

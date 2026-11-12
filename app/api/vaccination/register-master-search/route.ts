@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { fail, ok, requireUser, supabaseAdmin } from "../_utils";
 
 // VACCINATION_REGISTER_MASTER_SEARCH_API_V153_0
@@ -93,6 +94,7 @@ function mergePerson(existing: any, incoming: any) {
     ...primary,
     participantId: primary.participantId || secondary.participantId || null,
     historyPersonId: primary.historyPersonId || secondary.historyPersonId || null,
+    registrationId: primary.registrationId || secondary.registrationId || null,
     name: first(primary.name, secondary.name),
     employeeId: first(primary.employeeId, secondary.employeeId),
     nik: first(primary.nik, secondary.nik),
@@ -258,10 +260,33 @@ export async function GET(req: NextRequest) {
           .limit(80)
       : Promise.resolve({ data: [], error: null });
 
-    const [operationalResult, historyResult] = await Promise.all([
+    // V627: first-time Bazar walk-ins may exist ONLY in vaccination_registrations.
+    // Keep the company filter on the server; same Employee ID does NOT merge relatives.
+    const includeRegistrations = req.nextUrl.searchParams.get("include_registrations") === "1";
+    if (includeRegistrations && !canVaccinationAccess(user, "register")) {
+      return fail("Akses pencarian registrasi Family ditolak untuk role ini.", 403);
+    }
+    const regSessionResult = includeRegistrations
+      ? await supabase.from("vaccination_sessions")
+          .select("id,company_name").order("id", { ascending: false }).limit(5000)
+      : { data: [], error: null };
+    if (regSessionResult.error) throw new Error(regSessionResult.error.message);
+    const allowedSessionIds = (regSessionResult.data || [])
+      .filter((row: any) => companyKey(row.company_name) === group.key)
+      .map((row: any) => Number(row.id)).filter(Boolean);
+    const registrationPromise = allowedSessionIds.length
+      ? supabase.from("vaccination_registrations").select("*")
+          .in("session_id", allowedSessionIds)
+          .or([`participant_name.ilike.${like}`, `employee_id.ilike.${like}`, `nik.ilike.${like}`, `email.ilike.${like}`].join(","))
+          .order("id", { ascending: false }).limit(80)
+      : Promise.resolve({ data: [], error: null });
+
+    const [operationalResult, historyResult, registrationResult] = await Promise.all([
       operationalPromise,
       historyPromise,
+      registrationPromise,
     ]);
+    if (registrationResult.error) throw new Error(registrationResult.error.message);
 
     if (operationalResult.error) throw new Error(operationalResult.error.message);
     if (historyResult.error) throw new Error(historyResult.error.message);
@@ -362,6 +387,23 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    const mappedRegistration = (registrationResult.data || []).map((row: any) => ({
+      sourceType: "REGISTRATION",
+      sourceId: null,
+      registrationId: Number(row.id || 0) || null,
+      participantId: Number(row.participant_id || 0) || null,
+      historyPersonId: Number(row.history_person_id || 0) || null,
+      name: clean(row.participant_name),
+      employeeId: clean(row.employee_id),
+      nik: clean(row.nik),
+      email: clean(row.email),
+      phone: clean(row.phone),
+      birthDate: clean(row.birth_date),
+      companyName: group.name,
+      participantType: normalizedParticipantRole(row.family_role) || "EMPLOYEE",
+      sourceLabel: `Registrasi Session ${row.session_id}`,
+    }));
+
     // V582: a Database participant linked later as an existing Family member
     // must resolve to its canonical History dependent when there is exactly
     // one strong same-person match on BOTH sides. Never use employee ID alone.
@@ -390,7 +432,7 @@ export async function GET(req: NextRequest) {
     // least one shared strong identity (NIK / Employee ID / email). This avoids
     // accidentally merging a Parent and Child who may share an employee ID/NIK.
     const mergedGroups: Array<{ person: any; keys: Set<string>; sourceRows: any[] }> = [];
-    for (const row of [...mappedOperational, ...mappedHistory]) {
+    for (const row of [...mappedOperational, ...mappedHistory, ...mappedRegistration]) {
       if (!clean(row.name)) continue;
       const rowKeys = new Set(identityKeys(row));
       let matchIndex = mergedGroups.findIndex((candidateGroup) =>
@@ -439,6 +481,7 @@ export async function GET(req: NextRequest) {
           sourceType: row.sourceType,
           participantId: row.participantId || null,
           historyPersonId: row.historyPersonId || null,
+          registrationId: row.registrationId || null,
           employeeId: row.employeeId || "",
           nik: row.nik || "",
           email: row.email || "",

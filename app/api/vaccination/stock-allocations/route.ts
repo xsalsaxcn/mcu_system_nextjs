@@ -30,11 +30,12 @@ async function loadUsedMap(supabase: any, allocations: any[]) {
     .from("vaccination_registration_items")
     .select("id,lot_id,service_mode,status,registration:vaccination_registrations!inner(session_id)")
     .in("lot_id", lotIds)
-    .in("status", ["ADMINISTERED", "DONE"])
+    .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
     .in("registration.session_id", sessionIds)
     .eq("active", true)
     .limit(20000);
-  if (result.error) return map;
+  if (result.error) throw new Error("Tidak bisa memverifikasi pemakaian stok: " + result.error.message);
+  if ((result.data || []).length >= 20000) throw new Error("Data pemakaian stok melebihi batas audit; perhitungan ditahan.");
 
   for (const row of result.data || []) {
     const registration = Array.isArray((row as any).registration)
@@ -81,7 +82,10 @@ export async function GET(req: NextRequest) {
   }
 
   const allocations = allocationsResult.data || [];
-  const usedMap = await loadUsedMap(supabase, allocations);
+  let usedMap: Map<string, number>;
+  try { usedMap = await loadUsedMap(supabase, allocations); } catch (error: any) {
+    return fail(error?.message || "Audit pemakaian stok gagal.", 503);
+  }
   const sessionMap = new Map((sessionsResult.data || []).map((row: any) => [Number(row.id), row]));
   const vaccineMap = new Map((vaccinesResult.data || []).map((row: any) => [Number(row.id), row]));
   const lotMap = new Map((lotsResult.data || []).map((row: any) => [Number(row.id), row]));
