@@ -3953,6 +3953,17 @@ function HomeTab({
       workout_min_calories:
         asNumber(initialTargets?.workout_min_calories) ||
         current.workout_min_calories,
+      // WELLNESS_DIDIK_28_PARTICIPANT_TARGET_MIRROR_V1
+      // Only Didik: hydrate the current canonical Coach step target delivered
+      // by /participant/me. Everyone else keeps the exact existing behavior.
+      daily_step_target:
+        participantId === 28
+          ? asNumber(
+              initialTargets?.daily_step_target ||
+                participant?.daily_step_target ||
+                participant?.step_target,
+            ) || current.daily_step_target
+          : current.daily_step_target,
       // WELLNESS_PARTICIPANT_TARGET_BB_FALLBACK_V126M64_1
       // Hydrate current persisted/effective BB target immediately so Portal
       // never flashes or falls back to an obsolete Coach note while canonical

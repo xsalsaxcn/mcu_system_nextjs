@@ -23,6 +23,10 @@ import {
   wellnessStreakSteps,
   wellnessStreakWorkoutCalories,
 } from "@/lib/wellness/streak";
+import {
+  effectiveTargetsForDate,
+  loadEffectiveTargetTimeline,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -312,6 +316,30 @@ export async function GET(req: NextRequest) {
       },
     });
 
+    // WELLNESS_DIDIK_28_PARTICIPANT_TARGET_MIRROR_V1
+    // Participant-side only. Do not change Coach/target engine/rules.
+    // Didik's first Portal bootstrap must already carry the same current
+    // effective step target used by Coach, instead of waiting on a second
+    // browser request that can leave the UI on the 8,000 fallback.
+    let didikEffectiveStepTargetV1 = 0;
+    if (Number(participant.id || 0) === 28) {
+      try {
+        const didikTargetTimelineV1 = await loadEffectiveTargetTimeline({
+          supabase,
+          participant,
+        });
+        const didikCurrentTargetsV1 = effectiveTargetsForDate(
+          didikTargetTimelineV1,
+          new Date(),
+        );
+        didikEffectiveStepTargetV1 = Number(didikCurrentTargetsV1?.steps || 0);
+      } catch {
+        // Fail closed to the existing Portal behavior. Never make /me fail
+        // because this narrow mirror read is unavailable.
+        didikEffectiveStepTargetV1 = 0;
+      }
+    }
+
     return ok({
       participant: {
         ...participant,
@@ -325,6 +353,10 @@ export async function GET(req: NextRequest) {
           profilePhoto.photo_preview_url || "",
         wellness_control:
           fitnessSettings,
+        ...(Number(participant.id || 0) === 28 &&
+        didikEffectiveStepTargetV1 > 0
+          ? { daily_step_target: didikEffectiveStepTargetV1 }
+          : {}),
       },
       fitness_settings: fitnessSettings,
       integrations: integrations || [],
@@ -334,7 +366,13 @@ export async function GET(req: NextRequest) {
       streak_participant_id:
         canonicalStreakPayload?.participant_id || participant.id,
       streak: canonicalStreakPayload?.streak || null,
-      streak_targets: canonicalStreakPayload?.targets || null,
+      streak_targets:
+        Number(participant.id || 0) === 28 && didikEffectiveStepTargetV1 > 0
+          ? {
+              ...(canonicalStreakPayload?.targets || {}),
+              daily_step_target: didikEffectiveStepTargetV1,
+            }
+          : canonicalStreakPayload?.targets || null,
       streak_sources: canonicalStreakPayload?.sources || null,
       streak_status: canonicalStreakPayload?.status || null,
       streak_deferred: fastBootstrapV126M119_56B,
