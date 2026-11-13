@@ -143,6 +143,8 @@ export default function VaccinationRegisterPage() {
   const [v629Preview, setV629Preview] = useState<any | null>(null);
   const [v629PreviewLoading, setV629PreviewLoading] = useState(false);
   const [v629PreviewError, setV629PreviewError] = useState("");
+  // V629.5: Session 193-only request to open the existing family-safe walk-in flow.
+  const [v629ChildSelection, setV629ChildSelection] = useState<{ token: number; registrationId?: number; candidateIndex?: number } | null>(null);
   const deepLinkEditHandled = useRef(false);
   // V603: ignore stale Healthday/Bazar responses when operators switch views.
   const latestRegisterLoad = useRef(0);
@@ -501,7 +503,8 @@ export default function VaccinationRegisterPage() {
 
   const registrationProductOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const registration of queueReadyRegistrations) {
+    const productRows = v629NeedsReview && activeQueueView === "HEALTHDAY" ? sortedRegistrations : queueReadyRegistrations;
+    for (const registration of productRows) {
       const items = Array.isArray(registration?.items) ? registration.items : [];
       const matching = items.filter((item: any) => !healthdayBazarEnabled || String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView);
       for (const item of matching) {
@@ -517,8 +520,17 @@ export default function VaccinationRegisterPage() {
         if (!map.has(vaccineId)) map.set(vaccineId, String(registration.vaccine.name));
       }
     }
+    if (v629NeedsReview && activeQueueView === "HEALTHDAY" && Array.isArray(v629Preview?.candidates)) {
+      for (const candidate of v629Preview.candidates) {
+        for (const raw of Array.isArray(candidate?.mappedVaccineIds) ? candidate.mappedVaccineIds : []) {
+          const id = String(raw || "");
+          const vaccine = vaccines.find((v: any) => String(v.id) === id);
+          if (id && vaccine?.name && !map.has(id)) map.set(id, String(vaccine.name));
+        }
+      }
+    }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
-  }, [queueReadyRegistrations, healthdayBazarEnabled, activeQueueView]);
+  }, [queueReadyRegistrations, sortedRegistrations, healthdayBazarEnabled, activeQueueView, v629NeedsReview, v629Preview, vaccines]);
 
   useEffect(() => {
     setProductFilter("");
@@ -555,6 +567,39 @@ export default function VaccinationRegisterPage() {
       return haystack.includes(keyword);
     });
   }, [queueReadyRegistrations, sortedRegistrations, search, productFilter, healthdayBazarEnabled, activeQueueView]);
+
+  // V629.5: presentation-only 347-row BINUS Anak list. Do not change internal queue mode.
+  // Source preview and registered rows are joined by audited registration ID, never shared BINUSIAN ID.
+  const v629ChildRows = useMemo(() => {
+    if (!v629NeedsReview) return [] as any[];
+    // If preview is temporarily unavailable, keep the 223 existing registrations visible.
+    if (!Array.isArray(v629Preview?.candidates)) {
+      const keyword = search.trim().toLocaleLowerCase("id");
+      return registrations.filter((row: any) => {
+        if (!serviceHasTrack(row?.patient_service_status, "A")) return false;
+        if (keyword && ![row?.participant_name, row?.employee_id, row?.nik].some((x: any) => String(x || "").toLocaleLowerCase("id").includes(keyword))) return false;
+        if (productFilter && !((Array.isArray(row?.items) ? row.items : []).some((item: any) => String(item?.vaccine_id) === productFilter) || String(row?.vaccine_id || "") === productFilter)) return false;
+        return true;
+      }).map((row: any) => ({ existing: row, candidateIndex: -1, safe: true, unregistered: false, name: String(row.participant_name || ""), identity: String(row.employee_id || ""), batch: (Array.isArray(row.items) ? row.items : []).map((item: any) => item?.vaccine?.name).filter(Boolean).join(", ") || String(row?.vaccine?.name || "Data registrasi"), candidate: null }));
+    }
+    const byId = new Map<number, any>(registrations.map((r: any) => [Number(r?.id || 0), r]));
+    const keyword = search.trim().toLocaleLowerCase("id");
+    return v629Preview.candidates.map((candidate: any, candidateIndex: number) => {
+      const ids = Array.isArray(candidate?.matchedRegistrationIds)
+        ? candidate.matchedRegistrationIds.map((x: any) => Number(x)).filter((x: number) => x > 0) : [];
+      const existing = ids.length === 1 ? byId.get(ids[0]) || null : null;
+      const status = String(candidate?.auditStatus || "");
+      const safe = ids.length === 1 && status === "MATCHED_EXISTS" && Boolean(existing);
+      const unregistered = ids.length === 0 && status === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT";
+      const identity = String(candidate?.employeeId || "");
+      const name = String(candidate?.name || "");
+      const batch = Array.isArray(candidate?.sourceBatchNames) ? candidate.sourceBatchNames.filter(Boolean).join(", ") : "";
+      const matchesSearch = !keyword || [name, identity, candidate?.nik, batch].some((x: any) => String(x || "").toLocaleLowerCase("id").includes(keyword));
+      const matchesProduct = !productFilter || (Array.isArray(candidate?.mappedVaccineIds) && candidate.mappedVaccineIds.some((x: any) => String(x) === productFilter));
+      if (!matchesSearch || !matchesProduct) return null;
+      return { candidate, candidateIndex, existing, safe, unregistered, name, identity, batch, status };
+    }).filter(Boolean) as any[];
+  }, [v629NeedsReview, v629Preview, registrations, search, productFilter]);
 
   const pendingSelfBookings = useMemo(
     () => selfBookings.filter((booking: any) => String(booking?.booking_status || "").toUpperCase() === "PENDING"),
@@ -1594,7 +1639,7 @@ export default function VaccinationRegisterPage() {
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
 
         <section className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-          {[{ label: "Jumlah Peserta", value: summary.total }, { label: "Nomor Antrian", value: summary.current }, { label: "Belum Datang", value: summary.notArrived }, { label: "Menunggu", value: summary.waiting }, { label: "Dalam Tindakan", value: summary.doctor }, { label: "Selesai", value: summary.done }].map((card) => (
+          {[{ label: "Jumlah Peserta", value: v629NeedsReview && Array.isArray(v629Preview?.candidates) ? v629Preview.candidates.length : summary.total }, { label: "Nomor Antrian", value: summary.current }, { label: "Belum Datang", value: v629NeedsReview && Array.isArray(v629Preview?.candidates) ? summary.notArrived + Math.max(0, v629Preview.candidates.length - registrations.length) : summary.notArrived }, { label: "Menunggu", value: summary.waiting }, { label: "Dalam Tindakan", value: summary.doctor }, { label: "Selesai", value: summary.done }].map((card) => (
             <div key={card.label} className="rounded-2xl border bg-slate-50 p-4">
               <div className="text-xs font-black uppercase text-slate-500">{card.label}</div>
               <div className="mt-2 text-2xl font-black text-slate-900">{card.value}</div>
@@ -1797,6 +1842,7 @@ export default function VaccinationRegisterPage() {
                 : []}
               sessionCandidatesLoading={v629NeedsReview && v629PreviewLoading}
               sessionCandidatesError={v629NeedsReview ? v629PreviewError : ""}
+              v629SelectionRequest={v629NeedsReview ? v629ChildSelection : null}
               onParticipantReady={openWalkinModal}
             />
 
@@ -2486,6 +2532,74 @@ export default function VaccinationRegisterPage() {
           </section>
         ) : null}
 
+        {v629NeedsReview && activeQueueView === "HEALTHDAY" ? (
+          <section className="mt-6 overflow-hidden rounded-2xl border">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 p-4">
+              <div>
+                <div className="font-bold">Pencatatan Healthday · {Array.isArray(v629Preview?.candidates) ? v629Preview.candidates.length : registrations.length} peserta BINUS Anak</div>
+                <div className="mt-1 text-xs text-slate-600">{registrations.length} registrasi existing · sumber peserta untuk Session 193 · antrean tetap dirilis hanya saat peserta datang</div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => exportStage("all")} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold">Export Registrasi Existing</button>
+                <button type="button" onClick={() => exportStage("no_queue")} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold">Export Belum Datang Existing</button>
+              </div>
+              <div className="flex w-full flex-wrap gap-2">
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari nama / BINUSIAN ID / NIK..." className="w-full rounded-xl border bg-white px-3 py-2 text-sm sm:w-80" />
+                <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 text-sm sm:w-64">
+                  <option value="">Semua Produk Healthday</option>
+                  {registrationProductOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="max-h-[560px] overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
+                  <tr>
+                    <th className="p-3 text-left">No. Antrean</th>
+                    <th className="p-3 text-left">Nama</th>
+                    <th className="p-3 text-left">BINUSIAN ID / NIK</th>
+                    <th className="p-3 text-left">Produk / Batch</th>
+                    <th className="p-3 text-left">Status</th>
+                    <th className="p-3 text-left">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {v629ChildRows.map((entry: any) => {
+                    const row = entry.existing;
+                    const number = String(row?.queue_number || "").trim();
+                    const qStatus = String(row?.queue_status || "").toUpperCase();
+                    const label = number ? statusInfo(qStatus).label : "Belum Datang";
+                    const blocked = !(entry.safe || entry.unregistered);
+                    return (
+                      <tr key={`v6295-child-${entry.candidateIndex}`} className="hover:bg-slate-50">
+                        <td className="p-3 text-xs font-semibold">{number || <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800">Belum isi No. Antrean</span>}</td>
+                        <td className="p-3 font-bold">{entry.name}</td>
+                        <td className="p-3 text-xs">{entry.identity || entry.candidate?.nik || "-"}</td>
+                        <td className="p-3 text-xs">{entry.batch || "Perlu verifikasi produk"}</td>
+                        <td className="p-3"><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">{label}</span></td>
+                        <td className="p-3">
+                          {blocked ? <span className="text-xs font-semibold text-amber-700">Periksa identitas / produk</span> : (
+                            <button
+                              type="button"
+                              onClick={() => setV629ChildSelection((prev) => ({
+                                token: Number(prev?.token || 0) + 1,
+                                ...(entry.safe ? { registrationId: Number(row.id) } : { candidateIndex: entry.candidateIndex }),
+                              }))}
+                              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"
+                            >Daftarkan</button>
+                          )}
+                          {row ? <button type="button" onClick={() => openEditProducts(row)} className="ml-2 rounded-xl border bg-white px-3 py-2 text-xs font-bold">Edit Produk</button> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!v629ChildRows.length ? <tr><td colSpan={6} className="p-5 text-center text-slate-500">{v629PreviewLoading ? "Memuat data peserta BINUS Anak..." : "Data belum tersedia atau tidak sesuai pencarian. Registrasi existing tetap aman."}</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+            <p className="border-t bg-slate-50 px-4 py-2 text-xs text-slate-600">Daftarkan membuka Registrasi Ulang untuk verifikasi; tidak membuat antrean, tindakan, atau stok secara otomatis. Label Belum Datang bukan bukti vaksinasi belum dilakukan.</p>
+          </section>
+        ) : (
         <section className="mt-6 overflow-hidden rounded-2xl border">
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -2809,6 +2923,7 @@ export default function VaccinationRegisterPage() {
             </table>
           </div>
         </section>
+        )}
       </div>
       {editingSelfBooking ? (
         <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/55 p-4">

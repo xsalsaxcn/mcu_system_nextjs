@@ -1,7 +1,7 @@
 "use client";
 
 // VACCINATION_REGISTER_MASTER_SEARCH_COMPONENT_V153_74
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -123,6 +123,7 @@ export default function VaccinationParticipantMasterSearch({
   sessionCandidates = [],
   sessionCandidatesLoading = false,
   sessionCandidatesError = "",
+  v629SelectionRequest = null,
   onParticipantReady,
 }: {
   form: any;
@@ -132,6 +133,7 @@ export default function VaccinationParticipantMasterSearch({
   sessionCandidates?: any[];
   sessionCandidatesLoading?: boolean;
   sessionCandidatesError?: string;
+  v629SelectionRequest?: { token: number; registrationId?: number; candidateIndex?: number } | null;
   onParticipantReady?: () => void;
 }) {
   const [companies, setCompanies] = useState<any[]>([]);
@@ -558,6 +560,25 @@ export default function VaccinationParticipantMasterSearch({
     setCurrentOpen(false);
     window.setTimeout(() => onParticipantReady?.(), 0);
   }
+
+  // V629.5: safely open the exact original selection flow from the child-only
+  // pencatatan table. A shared BINUSIAN ID is never used to choose a person.
+  const v629LastSelectionToken = useRef(0);
+  useEffect(() => {
+    const req = v629SelectionRequest;
+    const token = Number(req?.token || 0);
+    if (sessionId !== 193 || !token || token === v629LastSelectionToken.current) return;
+    v629LastSelectionToken.current = token;
+    if (Number(req?.registrationId || 0) > 0) {
+      const row = sessionRegistrations.find((r: any) => Number(r?.id || 0) === Number(req?.registrationId));
+      if (row) chooseCurrentRegistration(row);
+      return;
+    }
+    if (typeof req?.candidateIndex === "number" && Number.isInteger(req.candidateIndex)) {
+      const candidate = sessionCandidates[req.candidateIndex];
+      if (candidate) chooseSessionSourceCandidate(candidate);
+    }
+  }, [v629SelectionRequest, sessionId, sessionRegistrations, sessionCandidates]);
 
   async function loadParticipantContext(row: any) {
     if (!sessionId) {
