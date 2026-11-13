@@ -1017,7 +1017,7 @@ export default function VaccinationParticipantMasterSearch({
           <div className="mt-1 text-xs font-semibold text-slate-500">
             {sessionId
               ? (sessionId === 193 && sessionCandidates.length
-                ? `${sessionCandidates.length} peserta sumber · ${sessionRegistrations.length} sudah registrasi · cari nama / ID / NIK`
+                ? `${sessionCandidates.length} anak terdata di import BINUS Anggrek · cari nama / ID / NIK`
                 : `${sessionRegistrations.length} peserta pada session terpilih · bisa dicari nama / ID / NIK`)
               : "Pilih session terlebih dahulu."}
             {sessionId === 193 && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
@@ -1056,7 +1056,7 @@ export default function VaccinationParticipantMasterSearch({
                   </div>
                   {row?.__v629SourceCandidate ? (
                     <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${row.__v629SourceCandidate.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
-                      {row.__v629SourceCandidate.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "Belum registrasi" : "Perlu verifikasi"}
+                      {row.__v629SourceCandidate.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "Data Import BINUS" : "Periksa identitas"}
                     </span>
                   ) : (
                     <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700">
