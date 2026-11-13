@@ -139,6 +139,11 @@ export default function VaccinationRegisterPage() {
 
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
   const [error, setError] = useState("");
+  // V629.1: read-only recovery preview, never creates registrations or queue numbers.
+  const [v629Preview, setV629Preview] = useState<any | null>(null);
+  const [v629PreviewLoading, setV629PreviewLoading] = useState(false);
+  const [v629PreviewError, setV629PreviewError] = useState("");
+  const [v629PreviewSearch, setV629PreviewSearch] = useState("");
   const deepLinkEditHandled = useRef(false);
   // V603: ignore stale Healthday/Bazar responses when operators switch views.
   const latestRegisterLoad = useRef(0);
@@ -241,6 +246,14 @@ export default function VaccinationRegisterPage() {
   const editHasBazar = Boolean(edit?.items.some((item) => item.serviceMode === "BAZAR"));
 
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
+  const v629NeedsReview = String(form.sessionId) === "193" && String(selectedSourceId) === "49";
+  // API V629 intentionally refuses a repeat import when a BINUS session has registrations.
+  const v629ExistingImportLocked = String(selectedSourceId) === "49" && registrations.length > 0;
+  useEffect(() => {
+    setV629Preview(null);
+    setV629PreviewError("");
+    setV629PreviewSearch("");
+  }, [form.sessionId, selectedSourceId]);
 
   // V571_VACCINATION_SOURCE_SCOPED_SESSION_SELECTION
   // Session & database must belong to the same source before loading participants.
@@ -1321,6 +1334,25 @@ export default function VaccinationRegisterPage() {
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
+  async function loadV629Preview() {
+    if (!v629NeedsReview || v629PreviewLoading) return;
+    setV629PreviewError("");
+    setV629PreviewLoading(true);
+    try {
+      const response = await fetch("/api/vaccination/import-corporate?session_id=193&mode=v629-preview", { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok || !json?.ok) {
+        setV629PreviewError(json?.message || "Gagal membaca preview V629.");
+        return;
+      }
+      setV629Preview(json);
+    } catch {
+      setV629PreviewError("Tidak dapat membaca preview. Periksa deployment V629 dan koneksi.");
+    } finally {
+      setV629PreviewLoading(false);
+    }
+  }
+
   async function importCorporate() {
     if (!form.sessionId) { setError("Pilih session terlebih dahulu."); return; }
     const sourceId = selectedSourceId;
@@ -1339,8 +1371,13 @@ export default function VaccinationRegisterPage() {
         body: JSON.stringify({ sessionId: Number(form.sessionId), sourceId: Number(sourceId), defaultVaccineId: Number(form.vaccineId || 0), defaultLotId: Number(form.lotId || 0), defaultVaccineIds: selectedVaccineIds.map((id) => Number(id)).filter(Boolean) }),
       }).then((r) => r.json());
       if (!json.ok) {
-        setMessage("");
-        setError(json.message || "Gagal memuat peserta.");
+        if (String(json.message || "").startsWith("V629 SAFETY STOP:")) {
+          setError("");
+          setMessage("Import ulang tidak dijalankan: registrasi lama dilindungi. Buka preview rekonsiliasi V629 untuk Session 193. Tidak ada peserta yang dihapus.");
+        } else {
+          setMessage("");
+          setError(json.message || "Gagal memuat peserta.");
+        }
         return;
       }
       setMessage(json.message || "Peserta berhasil dimuat. Nomor antrean belum dirilis.");
@@ -1639,9 +1676,42 @@ export default function VaccinationRegisterPage() {
             </p>
           ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={importCorporate} disabled={importing || !form.sessionId || !selectedSourceId || sessionSourceMismatch || !sessionsForSelectedSource.some((session: any) => String(session.id) === String(form.sessionId))} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{importing ? "Memuat..." : "Muat Peserta"}</button>
+            <button type="button" onClick={importCorporate} disabled={importing || v629ExistingImportLocked || !form.sessionId || !selectedSourceId || sessionSourceMismatch || !sessionsForSelectedSource.some((session: any) => String(session.id) === String(form.sessionId))} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60" title={v629ExistingImportLocked ? "Registrasi existing dilindungi. Jangan impor ulang sebelum rekonsiliasi identitas dan produk." : "Muat peserta"}>{importing ? "Memuat..." : v629ExistingImportLocked ? "Import Ulang Dikunci" : "Muat Peserta"}</button>
             <a href="/vaccination/session" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">Atur Session</a>
           </div>
+          {v629ExistingImportLocked ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+              Registrasi existing ({registrations.length}) tetap tersimpan. Import ulang dinonaktifkan agar identitas keluarga, produk, dan nomor antrean tidak terduplikasi. Peserta yang belum mempunyai nomor antrean tetap dapat dicari di Registrasi Ulang.
+            </div>
+          ) : null}
+          {v629NeedsReview ? (
+            <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/70 p-3 text-sm">
+              <div className="font-bold text-blue-900">Rekonsiliasi BINUS Anggrek — Session 193 (read-only)</div>
+              <p className="mt-1 text-xs text-blue-900">Total import dan registrasi existing berbeda. Preview ini hanya menampilkan calon peserta dan perbedaan produk; bukan proses pendaftaran atau rilis antrean.</p>
+              <button type="button" onClick={() => void loadV629Preview()} disabled={v629PreviewLoading} className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+                {v629PreviewLoading ? "Memeriksa..." : v629Preview ? "Refresh Preview Import" : "Lihat Preview 347 Data Import"}
+              </button>
+              {v629PreviewError ? <p className="mt-2 text-xs font-bold text-red-700">{v629PreviewError}</p> : null}
+              {v629Preview ? (
+                <div className="mt-3 rounded-lg border bg-white p-3">
+                  <p className="text-xs font-bold">Baris import: {v629Preview.importedSourceRows ?? "-"} · Kandidat identitas: {v629Preview.personsGroupedByNameAndNik ?? "-"} · Registrasi existing: {v629Preview.existingRegistrations ?? "-"} · Kandidat belum terdaftar: {v629Preview.missingCandidateCount ?? "-"}</p>
+                  <p className="mt-1 text-[11px] text-amber-800">Angka kandidat bukan persetujuan registrasi. Perlu verifikasi orang dan keterkaitan produk sebelum pemulihan.</p>
+                  <input className="mt-2 w-full rounded-lg border px-3 py-2 text-sm" placeholder="Cari nama kandidat dari import..." value={v629PreviewSearch} onChange={(e) => setV629PreviewSearch(e.target.value)} />
+                  <div className="mt-2 max-h-48 overflow-auto divide-y text-xs">
+                    {(Array.isArray(v629Preview.candidates) ? v629Preview.candidates : [])
+                      .filter((item: any) => String(item.name || "").toLowerCase().includes(v629PreviewSearch.trim().toLowerCase()))
+                      .slice(0, 80)
+                      .map((item: any, index: number) => (
+                        <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 py-2">
+                          <span className="font-semibold text-slate-800">{item.name || "(tanpa nama)"}</span>
+                          <span className="shrink-0 text-slate-600">{item.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "Belum ada registrasi — perlu audit" : item.auditStatus === "MATCHED_EXISTS" ? "Registrasi ada" : "Perlu rekonsiliasi"}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
@@ -2473,6 +2543,22 @@ export default function VaccinationRegisterPage() {
                 )}
               </thead>
               <tbody className="divide-y">
+                {/* V629.1: keep the queue table useful even before any queue number is released.
+                    These are READ-ONLY registration references, not active queue items. */}
+                {!visibleRegistrations.length && !search.trim() && !productFilter && internalQueueEnabled && healthdayBazarEnabled && queueReadyRegistrations.length === 0
+                  ? sortedRegistrations
+                    .filter((reg: any) => serviceHasTrack(reg?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A"))
+                    .map((reg: any) => (
+                      <tr key={`prequeue-${reg.id}`} className="bg-slate-50/70">
+                        <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-3">
+                          <span className="mr-3 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-800">Belum Rilis Antrean</span>
+                          <b className="text-slate-800">{reg.participant_name || "Peserta"}</b>
+                          <span className="ml-3 text-xs text-slate-500">{reg.employee_id || reg.mcu_id || "ID belum tersedia"}</span>
+                          <span className="ml-3 text-[11px] text-slate-500">Referensi saja — gunakan Registrasi Ulang saat peserta datang</span>
+                        </td>
+                      </tr>
+                    ))
+                  : null}
                 {visibleRegistrations.map((registration) => {
                   // Search result from a different track must not expose active
                   // queue, register or edit actions in the current service.
@@ -2698,7 +2784,7 @@ export default function VaccinationRegisterPage() {
                     </tr>
                   );
                 })}
-                {!visibleRegistrations.length ? (
+                {!visibleRegistrations.length && !(internalQueueEnabled && healthdayBazarEnabled && queueReadyRegistrations.length === 0 && !search.trim() && !productFilter && sortedRegistrations.some((reg: any) => serviceHasTrack(reg?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A"))) ? (
                   <tr>
                     <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-5 text-center text-slate-500">
                       {search.trim()
