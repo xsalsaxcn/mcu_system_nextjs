@@ -3915,10 +3915,13 @@ function HomeTab({
   const [participantStreakV126M23, setParticipantStreakV126M23] =
     useState<any>(initialParticipantStreakV126M26);
   // WELLNESS_EDITABLE_STEP_TARGET_V126M34
+  // WELLNESS_DIDIK_28_PARTICIPANT_TARGET_MIRROR_V2
+  // Didik must never be initialized/displayed with the generic 8,000 fallback
+  // while his canonical/effective individual target is being resolved.
   const [coachTargets, setCoachTargets] = useState({
     nutrition_max_calories: 0,
     workout_min_calories: 0,
-    daily_step_target: 8000,
+    daily_step_target: participantId === 28 ? 0 : 8000,
     target_weight_kg: 0,
   });
 
@@ -4050,7 +4053,14 @@ function HomeTab({
     );
     const actionPlan = clean(targetNote?.action_plan);
 
-    setCoachTargets({
+    const fallbackStepTargetV2 =
+      coachTargetFromText(
+        actionPlan,
+        /Target\s+Langkah\s*:\s*([0-9.,]+)/i,
+      ) ||
+      asNumber(participant?.daily_step_target || participant?.step_target);
+
+    setCoachTargets((previous: any) => ({
       nutrition_max_calories:
         coachTargetFromText(actionPlan, /Target\s+Nutrisi\s*:\s*([0-9.,]+)/i) ||
         asNumber(
@@ -4067,17 +4077,17 @@ function HomeTab({
             participant?.workout_calorie_target ||
             participant?.active_calorie_target,
         ),
+      // WELLNESS_DIDIK_28_PARTICIPANT_TARGET_MIRROR_V2
+      // For Didik only: a failed/empty fallback request may NOT downgrade a
+      // valid canonical/effective target to the generic 8,000 default.
       daily_step_target:
-        coachTargetFromText(
-          actionPlan,
-          /Target\s+Langkah\s*:\s*([0-9.,]+)/i,
-        ) ||
-        asNumber(participant?.daily_step_target || participant?.step_target) ||
-        8000,
+        participantId === 28
+          ? fallbackStepTargetV2 || previous?.daily_step_target || 0
+          : fallbackStepTargetV2 || 8000,
       target_weight_kg:
         coachTargetFromText(actionPlan, /Target\s+BB\s*:\s*([0-9.,]+)/i) ||
         asNumber(participant?.target_weight_kg || participant?.target_weight),
-    });
+    }));
   }
 
   async function loadParticipantStreakV126M23() {
@@ -4204,11 +4214,26 @@ function HomeTab({
   const nutritionTarget = asNumber(coachTargets.nutrition_max_calories);
   const workoutTarget = asNumber(coachTargets.workout_min_calories);
   const weightTarget = asNumber(coachTargets.target_weight_kg);
+
+  // WELLNESS_DIDIK_28_PARTICIPANT_TARGET_MIRROR_V2
+  // Canonical/effective target from participant bootstrap has first priority
+  // for Didik. The generic 8,000 default remains unchanged for everyone else.
+  const didikCanonicalStepTargetV2 =
+    participantId === 28
+      ? asNumber(
+          participant?.wellness_streak_targets?.daily_step_target ||
+            participant?.daily_step_target ||
+            participant?.step_target,
+        )
+      : 0;
+
   const stepsTarget = asNumber(
-    coachTargets.daily_step_target ||
-      participant?.daily_step_target ||
-      participant?.step_target ||
-      8000,
+    participantId === 28
+      ? didikCanonicalStepTargetV2 || coachTargets.daily_step_target || 0
+      : coachTargets.daily_step_target ||
+          participant?.daily_step_target ||
+          participant?.step_target ||
+          8000,
   );
   const latestWeight = asNumber(
     latestClinical?.weight_kg || latestClinical?.weight || latestClinical?.bb,
