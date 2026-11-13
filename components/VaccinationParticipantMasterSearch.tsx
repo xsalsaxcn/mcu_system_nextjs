@@ -115,6 +115,27 @@ function registrationTrackPriority(row: any, selectedMode: "HEALTHDAY" | "BAZAR"
     registrationPriority(row);
 }
 
+
+// V630: UI read-only candidates only for the verified BINUS CHILD sessions.
+const V630_CHILD_META: Record<number, { area: string; date: string }> = {
+  190: { area: "surabaya", date: "2026-11-05" },
+  191: { area: "medan", date: "2026-11-11" },
+  192: { area: "bekasi", date: "2026-11-14" },
+  193: { area: "anggrek", date: "2026-11-14" },
+  194: { area: "bandung", date: "2026-11-26" },
+  195: { area: "malang", date: "2026-11-26" },
+  196: { area: "semarang", date: "2026-11-27" },
+};
+function isV630BinusChildUI(session: any): boolean {
+  const meta = V630_CHILD_META[Number(session?.id || 0)];
+  const norm = (v: any) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return Boolean(meta)
+    && Number(session?.source_id || 0) === 49
+    && norm(session?.session_name).includes("binus healthday anak")
+    && norm(session?.location).includes(meta.area)
+    && String(session?.session_date || "").slice(0, 10) === meta.date;
+}
+
 export default function VaccinationParticipantMasterSearch({
   form,
   setForm,
@@ -363,7 +384,7 @@ export default function VaccinationParticipantMasterSearch({
       );
       if (keyword && !haystack.includes(keyword)) continue;
 
-      const key = sessionId === 193
+      const key = isV630BinusChildUI(session)
         ? `child:${normalized(row?.participant_name)}|${normalized(row?.nik)}`
         : sessionPersonKey(row);
       const current = grouped.get(key);
@@ -380,8 +401,8 @@ export default function VaccinationParticipantMasterSearch({
     // V629.4: add source participants NOT YET registered to the same search.
     // Never equate shared BINUSIAN ID with a unique person identity.
     // Keep existing registration rows unchanged and higher priority.
-    // Candidate list is provided only for the verified child Session 193.
-    if (sessionId === 193 && Array.isArray(sessionCandidates)) {
+    // Candidate list is provided only for the verified BINUS Child session.
+    if (isV630BinusChildUI(session) && Array.isArray(sessionCandidates)) {
       for (const [index, candidate] of sessionCandidates.entries()) {
         const name = clean(candidate?.name);
         const normalizedName = normalized(name);
@@ -511,7 +532,7 @@ export default function VaccinationParticipantMasterSearch({
   // V629.4: for a missing candidate, reuse the existing family-safe context
   // verifier; do NOT write a registration, copy a relative's items, or release a queue.
   function chooseSessionSourceCandidate(candidate: any) {
-    if (sessionId !== 193 || candidate?.auditStatus !== "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT") {
+    if (!isV630BinusChildUI(session) || candidate?.auditStatus !== "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT") {
       setError("Identitas ini memerlukan pemeriksaan petugas sebelum dapat dipilih.");
       return;
     }
@@ -567,7 +588,7 @@ export default function VaccinationParticipantMasterSearch({
   useEffect(() => {
     const req = v629SelectionRequest;
     const token = Number(req?.token || 0);
-    if (sessionId !== 193 || !token || token === v629LastSelectionToken.current) return;
+    if (!isV630BinusChildUI(session) || !token || token === v629LastSelectionToken.current) return;
     v629LastSelectionToken.current = token;
     if (Number(req?.registrationId || 0) > 0) {
       const row = sessionRegistrations.find((r: any) => Number(r?.id || 0) === Number(req?.registrationId));
@@ -1037,11 +1058,11 @@ export default function VaccinationParticipantMasterSearch({
           </div>
           <div className="mt-1 text-xs font-semibold text-slate-500">
             {sessionId
-              ? (sessionId === 193 && sessionCandidates.length
-                ? `${sessionCandidates.length} anak terdata di import BINUS Anggrek · cari nama / ID / NIK`
+              ? (isV630BinusChildUI(session) && sessionCandidates.length
+                ? `${sessionCandidates.length} anak terdata untuk ${session?.location || "lokasi BINUS Anak"} · cari nama / ID / NIK`
                 : `${sessionRegistrations.length} peserta pada session terpilih · bisa dicari nama / ID / NIK`)
               : "Pilih session terlebih dahulu."}
-            {sessionId === 193 && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
+            {isV630BinusChildUI(session) && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
           </div>
           <input
             value={currentQuery}
@@ -1052,7 +1073,7 @@ export default function VaccinationParticipantMasterSearch({
             placeholder="Cari peserta terdaftar di lokasi ini..."
             className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-emerald-400 disabled:bg-slate-100"
           />
-          {sessionId === 193 && sessionCandidatesError ? (
+          {isV630BinusChildUI(session) && sessionCandidatesError ? (
             <p className="mt-2 text-xs font-semibold text-amber-800">Daftar peserta sumber belum tersedia. Registrasi existing tetap bisa dicari.</p>
           ) : null}
           {sessionId && currentOpen ? (

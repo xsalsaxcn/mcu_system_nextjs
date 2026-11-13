@@ -115,6 +115,29 @@ function itemFromRegistrationItem(item: any): ProductItem {
   };
 }
 
+
+// V630: BINUS Child-only read-only attendee display, shared by seven audited sessions.
+// Explicit ID + Source + event name + location + date guard protects BINUS Dewasa.
+const V630_BINUS_CHILD_SESSIONS: Record<number, { area: string; date: string }> = {
+  190: { area: "surabaya", date: "2026-11-05" },
+  191: { area: "medan", date: "2026-11-11" },
+  192: { area: "bekasi", date: "2026-11-14" },
+  193: { area: "anggrek", date: "2026-11-14" },
+  194: { area: "bandung", date: "2026-11-26" },
+  195: { area: "malang", date: "2026-11-26" },
+  196: { area: "semarang", date: "2026-11-27" },
+};
+function isV630ChildSessionUI(session: any, sourceId: any): boolean {
+  const entry = V630_BINUS_CHILD_SESSIONS[Number(session?.id || 0)];
+  const normalize = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return Boolean(entry)
+    && Number(sourceId || 0) === 49
+    && Number(session?.source_id || 0) === 49
+    && normalize(session?.session_name).includes("binus healthday anak")
+    && normalize(session?.location).includes(entry.area)
+    && String(session?.session_date || "").slice(0,10) === entry.date;
+}
+
 export default function VaccinationRegisterPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
@@ -143,7 +166,7 @@ export default function VaccinationRegisterPage() {
   const [v629Preview, setV629Preview] = useState<any | null>(null);
   const [v629PreviewLoading, setV629PreviewLoading] = useState(false);
   const [v629PreviewError, setV629PreviewError] = useState("");
-  // V629.5: Session 193-only request to open the existing family-safe walk-in flow.
+  // V630: strict allowlisted BINUS Child sessions open the existing family-safe walk-in flow.
   const [v629ChildSelection, setV629ChildSelection] = useState<{ token: number; registrationId?: number; candidateIndex?: number } | null>(null);
   const deepLinkEditHandled = useRef(false);
   // V603: ignore stale Healthday/Bazar responses when operators switch views.
@@ -247,10 +270,10 @@ export default function VaccinationRegisterPage() {
   const editHasBazar = Boolean(edit?.items.some((item) => item.serviceMode === "BAZAR"));
 
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
-  const v629NeedsReview = String(form.sessionId) === "193" && String(selectedSourceId) === "49";
+  const v629NeedsReview = isV630ChildSessionUI(selectedSession, selectedSourceId);
   // V629.3: lock repeat import only for BINUS Healthday Anak Anggrek Session 193.
   // No impact to BINUS Dewasa or other sessions, including other Source 49 sessions.
-  const v629ExistingImportLocked = v629NeedsReview && registrations.length > 0;
+  const v629ExistingImportLocked = v629NeedsReview;
   useEffect(() => {
     setV629Preview(null);
     setV629PreviewError("");
@@ -1378,7 +1401,7 @@ export default function VaccinationRegisterPage() {
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
-  // V629.4: Session 193 only. Source records are SEARCH OPTIONS, not registrations.
+  // V630: only verified BINUS Child sessions. Source records are SEARCH OPTIONS, not registrations.
   // Reload on session/source change; no write and no automatic queue release.
   useEffect(() => {
     if (!v629NeedsReview) return;
@@ -1389,11 +1412,11 @@ export default function VaccinationRegisterPage() {
     void (async () => {
       try {
         const response = await fetch(
-          "/api/vaccination/import-corporate?session_id=193&mode=v629-preview",
+          `/api/vaccination/import-corporate?session_id=${form.sessionId}&mode=v629-preview`,
           { cache: "no-store", signal: controller.signal },
         );
         const json = await response.json();
-        if (!response.ok || !json?.ok || Number(json?.sessionId) !== 193 || Number(json?.sourceId) !== 49) {
+        if (!response.ok || !json?.ok || Number(json?.sessionId) !== Number(form.sessionId) || Number(json?.sourceId) !== 49) {
           throw new Error(json?.message || "Daftar peserta BINUS Anak belum tersedia.");
         }
         if (active) setV629Preview(json);
@@ -1407,17 +1430,17 @@ export default function VaccinationRegisterPage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [v629NeedsReview]);
+  }, [v629NeedsReview, form.sessionId]);
 
   async function loadV629Preview() {
     if (!v629NeedsReview || v629PreviewLoading) return;
     setV629PreviewError("");
     setV629PreviewLoading(true);
     try {
-      const response = await fetch("/api/vaccination/import-corporate?session_id=193&mode=v629-preview", { cache: "no-store" });
+      const response = await fetch(`/api/vaccination/import-corporate?session_id=${form.sessionId}&mode=v629-preview`, { cache: "no-store" });
       const json = await response.json();
-      if (!response.ok || !json?.ok) {
-        setV629PreviewError(json?.message || "Gagal membaca preview V629.");
+      if (!response.ok || !json?.ok || Number(json.sessionId) !== Number(form.sessionId) || Number(json.sourceId) !== 49) {
+        setV629PreviewError(json?.message || "Gagal membaca preview V630.");
         return;
       }
       setV629Preview(json);
@@ -1448,7 +1471,7 @@ export default function VaccinationRegisterPage() {
       if (!json.ok) {
         if (String(json.message || "").startsWith("V629 SAFETY STOP:")) {
           setError("");
-          setMessage("Import ulang tidak dijalankan: registrasi lama dilindungi. Buka preview rekonsiliasi V629 untuk Session 193. Tidak ada peserta yang dihapus.");
+          setMessage("Import ulang tidak dijalankan: registrasi lama dilindungi. Buka audit peserta BINUS Anak pada Session terpilih. Tidak ada peserta yang dihapus.");
         } else {
           setMessage("");
           setError(json.message || "Gagal memuat peserta.");
@@ -1751,17 +1774,17 @@ export default function VaccinationRegisterPage() {
             </p>
           ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={importCorporate} disabled={importing || v629ExistingImportLocked || !form.sessionId || !selectedSourceId || sessionSourceMismatch || !sessionsForSelectedSource.some((session: any) => String(session.id) === String(form.sessionId))} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60" title={v629ExistingImportLocked ? "Registrasi existing dilindungi. Jangan impor ulang sebelum rekonsiliasi identitas dan produk." : "Muat peserta"}>{importing ? "Memuat..." : v629ExistingImportLocked ? "Import Ulang Dikunci" : "Muat Peserta"}</button>
+            <button type="button" onClick={importCorporate} disabled={importing || v629ExistingImportLocked || !form.sessionId || !selectedSourceId || sessionSourceMismatch || !sessionsForSelectedSource.some((session: any) => String(session.id) === String(form.sessionId))} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60" title={v629ExistingImportLocked ? "Registrasi existing dilindungi. Jangan impor ulang sebelum rekonsiliasi identitas dan produk." : "Muat peserta"}>{importing ? "Memuat..." : v629ExistingImportLocked ? "Import BINUS Anak Dikunci" : "Muat Peserta"}</button>
             <a href="/vaccination/session" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">Atur Session</a>
           </div>
           {v629ExistingImportLocked ? (
             <p className="mt-2 text-xs text-slate-600">
-              {registrations.length} registrasi existing tetap tersimpan. Import ulang dikunci untuk mencegah data keluarga dan vaksin tergabung atau terduplikasi. Peserta dapat dicari melalui Registrasi Ulang.
+              {registrations.length} registrasi existing tetap tersimpan. Import massal BINUS Anak dinonaktifkan; seluruh peserta sumber dapat dicari melalui Registrasi Ulang.
             </p>
           ) : null}
           {v629NeedsReview ? (
             <details className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-              <summary className="cursor-pointer font-semibold text-slate-700">Audit kandidat Session 193 (read-only, tanpa import)</summary>
+              <summary className="cursor-pointer font-semibold text-slate-700">Audit kandidat BINUS Anak (read-only, tanpa import)</summary>
               <p className="mt-2">Membandingkan data sumber dan registrasi existing. Tidak menambah peserta, item vaksin, nomor antrean, atau stok.</p>
               <button type="button" onClick={() => void loadV629Preview()} disabled={v629PreviewLoading} className="mt-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 {v629PreviewLoading ? "Memeriksa..." : "Lihat hasil audit kandidat"}
@@ -1837,7 +1860,7 @@ export default function VaccinationRegisterPage() {
               setForm={setForm}
               session={selectedSession}
               sessionRegistrations={registrations}
-              sessionCandidates={v629NeedsReview && Number(v629Preview?.sessionId) === 193 && Number(v629Preview?.sourceId) === 49
+              sessionCandidates={v629NeedsReview && Number(v629Preview?.sessionId) === Number(form.sessionId) && Number(v629Preview?.sourceId) === 49
                 ? (Array.isArray(v629Preview?.candidates) ? v629Preview.candidates : [])
                 : []}
               sessionCandidatesLoading={v629NeedsReview && v629PreviewLoading}
@@ -2537,7 +2560,7 @@ export default function VaccinationRegisterPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 p-4">
               <div>
                 <div className="font-bold">Pencatatan Healthday · {Array.isArray(v629Preview?.candidates) ? v629Preview.candidates.length : registrations.length} peserta BINUS Anak</div>
-                <div className="mt-1 text-xs text-slate-600">{registrations.length} registrasi existing · sumber peserta untuk Session 193 · antrean tetap dirilis hanya saat peserta datang</div>
+                <div className="mt-1 text-xs text-slate-600">{registrations.length} registrasi existing · sumber peserta untuk Session {form.sessionId} · antrean tetap dirilis hanya saat peserta datang</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => exportStage("all")} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold">Export Registrasi Existing</button>

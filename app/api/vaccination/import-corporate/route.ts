@@ -452,16 +452,31 @@ function makeKey(row: any) {
   ].filter(Boolean).join("|");
 }
 
+// V630: strict allowlist of seven BINUS CHILD sessions from audited Source 49.
+// NEVER use Source 49 alone: BINUS Dewasa shares this data source.
+const V630_BINUS_CHILD_SESSIONS: Record<number, { area: string; date: string }> = {
+  190: { area: "surabaya", date: "2026-11-05" },
+  191: { area: "medan", date: "2026-11-11" },
+  192: { area: "bekasi", date: "2026-11-14" },
+  193: { area: "anggrek", date: "2026-11-14" },
+  194: { area: "bandung", date: "2026-11-26" },
+  195: { area: "malang", date: "2026-11-26" },
+  196: { area: "semarang", date: "2026-11-27" },
+};
+
+function isV630BinusChildSession(session: any, sourceId: number) {
+  const id = toInt(session?.id, 0);
+  const expected = V630_BINUS_CHILD_SESSIONS[id];
+  return Boolean(expected)
+    && sourceId === 49
+    && toInt(session?.source_id, 0) === 49
+    && normalizedText(session?.session_name).includes("binus healthday anak")
+    && normalizedText(session?.location).includes(expected.area)
+    && clean(session?.session_date).slice(0, 10) === expected.date;
+}
+
 // V629.3: strict child-only guard. Source 49 is shared with BINUS sessions,
 // and must NEVER independently enable import protection or family-safe dedup.
-function isBinusAnakAnggrek193(session: any, sourceId: number) {
-  return toInt(session?.id, 0) === 193
-    && toInt(session?.source_id, 0) === 49
-    && sourceId === 49
-    && normalizedText(session?.session_name).includes("binus healthday anak")
-    && normalizedText(session?.location).includes("anggrek")
-    && clean(session?.session_date).slice(0, 10) === "2026-11-14";
-}
 
 async function fetchVaccinationSourceParticipants(supabase: any, sourceId: number, session: any) {
   const errors: string[] = [];
@@ -488,7 +503,8 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
       return clean(row.import_location_key) === locationKey || sameLocationDate(row, session);
     });
     const rows = rawRows.map(normalizeRowFromVaccinationImport).filter((row: any) => clean(row.participant_name));
-    return { rows: groupVaccinationImportRows(rows, isBinusAnakAnggrek193(session, sourceId)), sourceTable: "vaccination_import_rows", errors };
+    if (rows.length) return { rows: groupVaccinationImportRows(rows, isV630BinusChildSession(session, sourceId)), sourceTable: "vaccination_import_rows", errors };
+    errors.push("vaccination_import_rows: no rows for this exact location/date; trying participants");
   }
   if (vaccinationImportResult.error) errors.push(`vaccination_import_rows: ${vaccinationImportResult.error.message}`);
 
@@ -536,7 +552,7 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
       // yang sudah terbentuk dari Duplicate Katalog dipakai persis seperti
       // vaccination_import_rows.
       const rows = attempt.table === "participants"
-        ? groupVaccinationImportRows(normalizedRows, isBinusAnakAnggrek193(session, sourceId))
+        ? groupVaccinationImportRows(normalizedRows, isV630BinusChildSession(session, sourceId))
         : normalizedRows;
 
       return { rows, sourceTable: attempt.table, errors };
@@ -547,7 +563,7 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
   return { rows: [], sourceTable: "", errors };
 }
 
-// V629 READ ONLY: audited preview for BINUS child session 193 only.
+// V630 READ ONLY: audited preview for the seven explicitly verified BINUS Child Sessions.
 // Neither a GET request nor this code path creates registrations, vaccines or queue numbers.
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
@@ -557,14 +573,14 @@ export async function GET(req: NextRequest) {
     return fail("Mode tidak dikenali.", 400);
   }
   const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
-  if (sessionId !== 193) return fail("Audit V629 dibatasi untuk Session 193.", 403);
+  if (!V630_BINUS_CHILD_SESSIONS[sessionId]) return fail("Audit BINUS Anak tidak tersedia untuk Session ini.", 403);
   const supabase = supabaseAdmin();
   const sessionRead = await supabase.from("vaccination_sessions")
     .select("id,source_id,session_name,location,session_date,import_location_key")
     .eq("id", sessionId).single();
   if (sessionRead.error || !sessionRead.data) return fail("Session audit tidak ditemukan.", 404);
   const session = sessionRead.data;
-  if (!isBinusAnakAnggrek193(session, 49)) return fail("Audit dibatalkan: identitas BINUS Anak Anggrek Session 193 tidak cocok.", 409);
+  if (!isV630BinusChildSession(session, 49)) return fail("Audit dibatalkan: metadata Session BINUS Anak tidak cocok.", 409);
 
   const imported = await fetchVaccinationSourceParticipants(supabase, 49, session);
   if (!imported.rows.length) return fail("Tidak ada baris source untuk audit V629.", 409, { errors: imported.errors });
@@ -581,7 +597,7 @@ export async function GET(req: NextRequest) {
   const regs = registrationResult.data || [];
   if (regs.length >= 1000) return fail("Jumlah registrasi mencapai batas audit 1000. Hentikan dan gunakan SQL read-only.", 409);
 
-  const mapping = await getManualBatchMappings(supabase, 193, 49);
+  const mapping = await getManualBatchMappings(supabase, sessionId, 49);
   const existingItemsRead = await supabase.from("vaccination_registration_items")
     .select("id,registration_id,vaccine_id,lot_id,dose_number,status,active")
     .eq("session_id", sessionId).limit(1000);
@@ -678,7 +694,7 @@ export async function GET(req: NextRequest) {
     productAttributionReviewCount: candidates.filter((x: any) => x.auditStatus === "MATCHED_REVIEW_PRODUCT_ATTRIBUTION").length,
     manualIdentityReviewCount: candidates.filter((x: any) => x.auditStatus === "MANUAL_IDENTITY_REVIEW").length,
     sharedExternalGroupCount: Array.from(legacyByExternal.values()).filter((names) => names.size > 1).length,
-    advisory: "Preview bukan persetujuan untuk membuat registrasi. Item vaksin 223 existing harus direkonsiliasi sebelum pemulihan. Tidak ada SQL write.",
+    advisory: "Preview read-only. Kandidat tidak otomatis dibuatkan registrasi/nomor antrean. Identitas dan vaksin harus diverifikasi saat datang; registrasi existing tetap utuh.",
     candidates,
   });
 }
@@ -701,23 +717,17 @@ export async function POST(req: NextRequest) {
   const session = sessionResult.data || {};
   const sourceId = sourceIdInput || toInt(session.source_id, 0);
   if (!sourceId) return fail("Database corporate/vaksinasi wajib dipilih.");
-  // V629.3: only Session 193 BINUS Healthday Anak Anggrek is locked.
-  // BINUS Adult, BINUS Anak Bekasi and all other sessions keep legacy import behavior.
-  // Never use sourceId 49 alone because it is not a person/session discriminator.
-  if (sessionId === 193 && !isBinusAnakAnggrek193(session, sourceId)) {
-    return fail("SAFETY STOP: metadata BINUS Anak Session 193 tidak cocok; import dibatalkan.", 409);
+  // V630: refuse automatic bulk imports ONLY on the seven exact BINUS Child sessions.
+  // Adult and unrelated sources/sessions retain their original importer behavior.
+  if (V630_BINUS_CHILD_SESSIONS[sessionId] && !isV630BinusChildSession(session, sourceId)) {
+    return fail("V630 SAFETY STOP: Session Anak tidak cocok dengan allowlist tanggal/lokasi/Source. Tidak ada perubahan.", 409);
   }
-  if (isBinusAnakAnggrek193(session, sourceId)) {
-    const existingSource49 = await supabase.from("vaccination_registrations")
-      .select("id").eq("session_id", sessionId).limit(1);
-    if (existingSource49.error) return fail(existingSource49.error.message, 500);
-    if ((existingSource49.data || []).length > 0) {
-      return fail(
-        "V629 SAFETY STOP: import ulang Session BINUS yang sudah memiliki registrasi diblokir sampai item vaksin dan identitas direkonsiliasi. Tidak ada registrasi baru dibuat.",
-        409,
-        { v629PreviewUrl: sessionId === 193 ? "/api/vaccination/import-corporate?session_id=193&mode=v629-preview" : null },
-      );
-    }
+  if (isV630BinusChildSession(session, sourceId)) {
+    return fail(
+      "V630 SAFETY STOP: peserta BINUS Anak sudah tersedia di database sumber. Cari melalui Registrasi Ulang; impor massal dinonaktifkan demi keamanan identitas keluarga.",
+      409,
+      { v629PreviewUrl: `/api/vaccination/import-corporate?session_id=${sessionId}&mode=v629-preview` },
+    );
   }
 
   let manualMappings = new Map<string, ManualMappingItem>();
