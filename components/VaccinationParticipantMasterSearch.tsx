@@ -372,11 +372,26 @@ export default function VaccinationParticipantMasterSearch({
     [companies, companyKey],
   );
 
+  // V632.1: strict active-service rendering for all combined Healthday/Bazar sessions,
+  // regardless of BINUS child/adult. This affects UI search only, not historical lookup.
+  const currentServiceMode: "HEALTHDAY" | "BAZAR" =
+    clean(form?.serviceMode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+  const hasSeparatedServices = clean(session?.existing_queue_profile).toUpperCase() === "HEALTHDAY_BAZAR";
+  const eligibleSessionRegistrations = useMemo(() => {
+    if (!hasSeparatedServices) return sessionRegistrations;
+    return sessionRegistrations.filter((row: any) => {
+      const status = clean(row?.patient_service_status || "HEALTHDAY").toUpperCase();
+      // Follow the same track rule as the queue table; do not silently infer
+      // Bazar enrollment from a legacy item with a conflicting service status.
+      return status === currentServiceMode || status === "COMBINATION";
+    });
+  }, [sessionRegistrations, hasSeparatedServices, currentServiceMode]);
+
   const currentSessionRows = useMemo(() => {
     const keyword = normalized(currentQuery);
     const grouped = new Map<string, any>();
 
-    for (const row of Array.isArray(sessionRegistrations) ? sessionRegistrations : []) {
+    for (const row of Array.isArray(eligibleSessionRegistrations) ? eligibleSessionRegistrations : []) {
       const haystack = normalized(
         [row?.participant_name, row?.employee_id, row?.nik, row?.email, row?.queue_number, row?.bazar_queue_number]
           .filter(Boolean)
@@ -391,9 +406,8 @@ export default function VaccinationParticipantMasterSearch({
       // V602: when the same person has separate Bazar and Healthday rows,
       // select the registration for the operator's current service. Otherwise
       // a completed Bazar row can hide the participant's free benefit.
-      const currentService = String(form?.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
-      const rowScore = registrationTrackPriority(row, currentService);
-      if (!current || rowScore > registrationTrackPriority(current, currentService)) {
+      const rowScore = registrationTrackPriority(row, currentServiceMode);
+      if (!current || rowScore > registrationTrackPriority(current, currentServiceMode)) {
         grouped.set(key, row);
       }
     }
@@ -402,7 +416,8 @@ export default function VaccinationParticipantMasterSearch({
     // Never equate shared BINUSIAN ID with a unique person identity.
     // Keep existing registration rows unchanged and higher priority.
     // Candidate list is provided only for the verified BINUS Child session.
-    if (isV630BinusChildUI(session) && Array.isArray(sessionCandidates)) {
+    // The source-2026 child candidate list belongs to Healthday, not Bazar.
+    if (currentServiceMode === "HEALTHDAY" && isV630BinusChildUI(session) && Array.isArray(sessionCandidates)) {
       for (const [index, candidate] of sessionCandidates.entries()) {
         const name = clean(candidate?.name);
         const normalizedName = normalized(name);
@@ -423,7 +438,7 @@ export default function VaccinationParticipantMasterSearch({
         clean(a?.participant_name).localeCompare(clean(b?.participant_name), "id"),
       )
       .slice(0, 60);
-  }, [sessionId, sessionRegistrations, sessionCandidates, currentQuery, form?.serviceMode]);
+  }, [sessionId, eligibleSessionRegistrations, sessionCandidates, currentQuery, currentServiceMode, session]);
 
   function applyParticipant(row: any, extra: any = {}) {
     const participantId = Number(row?.participantId || row?.participant_id || 0) || null;
@@ -1058,11 +1073,13 @@ export default function VaccinationParticipantMasterSearch({
           </div>
           <div className="mt-1 text-xs font-semibold text-slate-500">
             {sessionId
-              ? (isV630BinusChildUI(session) && sessionCandidates.length
+              ? (hasSeparatedServices && currentServiceMode === "BAZAR"
+                ? `${eligibleSessionRegistrations.length} registrasi Bazar pada session terpilih · cari nama / ID / NIK`
+                : isV630BinusChildUI(session) && sessionCandidates.length
                 ? `${sessionCandidates.length} anak terdata untuk ${session?.location || "lokasi BINUS Anak"} · cari nama / ID / NIK`
-                : `${sessionRegistrations.length} peserta pada session terpilih · bisa dicari nama / ID / NIK`)
+                : `${eligibleSessionRegistrations.length} peserta ${hasSeparatedServices ? "Healthday" : "pada session terpilih"} · cari nama / ID / NIK`)
               : "Pilih session terlebih dahulu."}
-            {isV630BinusChildUI(session) && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
+            {currentServiceMode === "HEALTHDAY" && isV630BinusChildUI(session) && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
           </div>
           <input
             value={currentQuery}
@@ -1073,7 +1090,7 @@ export default function VaccinationParticipantMasterSearch({
             placeholder="Cari peserta terdaftar di lokasi ini..."
             className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-emerald-400 disabled:bg-slate-100"
           />
-          {isV630BinusChildUI(session) && sessionCandidatesError ? (
+          {currentServiceMode === "HEALTHDAY" && isV630BinusChildUI(session) && sessionCandidatesError ? (
             <p className="mt-2 text-xs font-semibold text-amber-800">Daftar peserta sumber belum tersedia. Registrasi existing tetap bisa dicari.</p>
           ) : null}
           {sessionId && currentOpen ? (
@@ -1102,13 +1119,13 @@ export default function VaccinationParticipantMasterSearch({
                     </span>
                   ) : (
                     <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                      {String(row?.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
+                      {hasSeparatedServices ? (currentServiceMode === "BAZAR" ? "Bazar" : "Healthday") : (String(row?.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday")}
                     </span>
                   )}
                 </button>
               ))}
               {!currentSessionRows.length ? (
-                <div className="px-3 py-3 text-xs font-semibold text-slate-500">Peserta tidak ditemukan di session ini.</div>
+                <div className="px-3 py-3 text-xs font-semibold text-slate-500">Peserta tidak ditemukan pada layanan {currentServiceMode === "BAZAR" ? "Bazar" : "Healthday"} di session ini. Cari peserta layanan lain melalui Walk-in.</div>
               ) : null}
             </div>
           ) : null}

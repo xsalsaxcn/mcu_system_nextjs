@@ -561,9 +561,16 @@ export default function VaccinationRegisterPage() {
 
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    // V602: global participant lookup stays read-only for the opposite service.
-    // Queue actions, counts, exports and product selection remain service-scoped.
-    const searchRows = keyword ? sortedRegistrations : queueReadyRegistrations;
+    // V632.1: a service tab only displays participants registered in that service,
+    // including COMBINATION. Do not leak Healthday rows into Bazar by typing a name.
+    // Search may still find an unqueued registration, but never another service.
+    const searchRows = keyword
+      ? sortedRegistrations.filter((registration: any) =>
+          !healthdayBazarEnabled || serviceHasTrack(
+            registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A",
+          ),
+        )
+      : queueReadyRegistrations;
     return searchRows.filter((registration: any) => {
       const serviceItems = (Array.isArray(registration.items) ? registration.items : []).filter((item: any) => {
         if (!healthdayBazarEnabled) return true;
@@ -2635,9 +2642,8 @@ export default function VaccinationRegisterPage() {
                     : `Pencatatan Session Ini · ${registrations.length} peserta`)}</div>
               {healthdayBazarEnabled ? (
                 <div className="mt-2 text-xs font-semibold text-slate-600">
-                  Total Session <b>{serviceCoverage.total}</b> · Healthday <b>{serviceCoverage.healthday}</b> · Bazar <b>{serviceCoverage.bazar}</b> · Keduanya <b>{serviceCoverage.both}</b>
-                  {serviceCoverage.neither > 0 ? <> · Perlu cek layanan <b>{serviceCoverage.neither}</b></> : null}
-                  <span className="mt-1 block text-[11px] text-slate-500">Pencarian nama/ID menjangkau seluruh Session. Peserta dari layanan lain hanya ditampilkan sebagai referensi, tanpa tombol tindakan.</span>
+                  Mode <b>{activeQueueView === "BAZAR" ? "Bazar" : "Healthday"}</b> · hanya peserta pada layanan ini yang tampil (peserta Kombinasi termasuk).
+                  <span className="mt-1 block text-[11px] text-slate-500">Untuk mencari peserta dari layanan lain yang ingin mendaftar Bazar, gunakan Walk-in / Peserta Lain. Tidak mengubah registrasi existing.</span>
                 </div>
               ) : null}
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -2705,22 +2711,10 @@ export default function VaccinationRegisterPage() {
               </thead>
               <tbody className="divide-y">
                 {visibleRegistrations.map((registration) => {
-                  // Search result from a different track must not expose active
-                  // queue, register or edit actions in the current service.
-                  const inCurrentTrack = !healthdayBazarEnabled || serviceHasTrack(
+                  // V632.1 defense-in-depth: never render a cross-service name or action.
+                  if (healthdayBazarEnabled && !serviceHasTrack(
                     registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A",
-                  );
-                  if (!inCurrentTrack) return (
-                    <tr key={registration.id} className="bg-amber-50/70">
-                      <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-3 text-xs text-amber-900">
-                        <b>{registration.participant_name || "Peserta"}</b> · {registration.employee_id || registration.mcu_id || "ID belum ada"}
-                        <span className="ml-2 rounded-full bg-amber-100 px-2 py-1 font-bold">
-                          Terdaftar di {String(registration?.patient_service_status || "").toUpperCase() === "BAZAR" ? "Bazar" : "layanan lain"}; bukan {activeQueueView}
-                        </span>
-                        <span className="ml-2 text-amber-700">Hanya hasil pencarian. Buka layanan yang sesuai untuk tindakan.</span>
-                      </td>
-                    </tr>
-                  );
+                  )) return null;
                   const info = statusInfo(registration.queue_status);
                   const bazarInfo = statusInfo(registration.bazar_queue_status);
                   const allItems = Array.isArray(registration.items) ? registration.items : [];
