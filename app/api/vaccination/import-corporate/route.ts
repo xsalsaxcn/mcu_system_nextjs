@@ -86,7 +86,17 @@ function normalizeRowFromImport(row: any) {
   };
 }
 
-function makeParticipantIdentityKey(row: any) {
+// V629: BINUSIAN/external ID can be shared by siblings and parents.
+// Never treat a family/company identifier, email or phone as a unique person key.
+// NIK is combined with the name instead of silently merging two different names.
+function makeFamilySafeParticipantKey(row: any) {
+  const name = normalizedText(row.participant_name);
+  if (!name) return "";
+  const nik = normalizedText(row.nik);
+  return `name:${name}${nik ? `|nik:${nik}` : ""}`;
+}
+
+function makeLegacyParticipantIdentityKey(row: any) {
   return firstNonEmpty(
     row.nik ? `nik:${normalizedText(row.nik)}` : "",
     row.employee_id ? `external:${normalizedText(row.employee_id)}` : "",
@@ -97,15 +107,22 @@ function makeParticipantIdentityKey(row: any) {
   );
 }
 
-function groupVaccinationImportRows(rows: any[]) {
+function groupVaccinationImportRows(rows: any[], familySafe = false) {
   const grouped = new Map<string, any>();
   for (const row of rows) {
-    const key = makeParticipantIdentityKey(row);
+    const key = familySafe ? makeFamilySafeParticipantKey(row) : makeLegacyParticipantIdentityKey(row);
     if (!key) continue;
     if (!grouped.has(key)) {
-      grouped.set(key, { ...row, source_vaccine_rows: [] });
+      grouped.set(key, { ...row, source_vaccine_rows: [], v629_identity_conflict: false });
     }
     const item = grouped.get(key)!;
+    // Different external IDs with identical name and absent NIK are ambiguous.
+    // This is audit metadata; never silently rewrite an existing registration.
+    const beforeExternal = normalizedText(item.employee_id);
+    const nextExternal = normalizedText(row.employee_id);
+    if (familySafe && beforeExternal && nextExternal && beforeExternal !== nextExternal) {
+      item.v629_identity_conflict = true;
+    }
     item.source_vaccine_rows.push(row);
     item.nik = item.nik || row.nik;
     item.email = item.email || row.email;
@@ -459,7 +476,7 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
       return clean(row.import_location_key) === locationKey || sameLocationDate(row, session);
     });
     const rows = rawRows.map(normalizeRowFromVaccinationImport).filter((row: any) => clean(row.participant_name));
-    return { rows: groupVaccinationImportRows(rows), sourceTable: "vaccination_import_rows", errors };
+    return { rows: groupVaccinationImportRows(rows, sourceId === 49), sourceTable: "vaccination_import_rows", errors };
   }
   if (vaccinationImportResult.error) errors.push(`vaccination_import_rows: ${vaccinationImportResult.error.message}`);
 
@@ -507,7 +524,7 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
       // yang sudah terbentuk dari Duplicate Katalog dipakai persis seperti
       // vaccination_import_rows.
       const rows = attempt.table === "participants"
-        ? groupVaccinationImportRows(normalizedRows)
+        ? groupVaccinationImportRows(normalizedRows, sourceId === 49)
         : normalizedRows;
 
       return { rows, sourceTable: attempt.table, errors };
@@ -516,6 +533,127 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
   }
 
   return { rows: [], sourceTable: "", errors };
+}
+
+// V629 READ ONLY: audited preview for BINUS child session 193 only.
+// Neither a GET request nor this code path creates registrations, vaccines or queue numbers.
+export async function GET(req: NextRequest) {
+  const user = requireUser(req);
+  if (!user) return fail("Unauthorized", 401);
+  if (req.nextUrl.searchParams.get("mode") !== "v629-preview") {
+    return fail("Mode tidak dikenali.", 400);
+  }
+  const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
+  if (sessionId !== 193) return fail("Audit V629 dibatasi untuk Session 193.", 403);
+  const supabase = supabaseAdmin();
+  const sessionRead = await supabase.from("vaccination_sessions")
+    .select("id,source_id,location,session_date,import_location_key")
+    .eq("id", sessionId).single();
+  if (sessionRead.error || !sessionRead.data) return fail("Session audit tidak ditemukan.", 404);
+  const session = sessionRead.data;
+  if (toInt(session.source_id, 0) !== 49) return fail("Source Session 193 berubah. Audit dihentikan.", 409);
+
+  const imported = await fetchVaccinationSourceParticipants(supabase, 49, session);
+  if (!imported.rows.length) return fail("Tidak ada baris source untuk audit V629.", 409, { errors: imported.errors });
+  if (imported.sourceTable !== "vaccination_import_rows") {
+    return fail("V629 mengharapkan sumber vaccination_import_rows. Audit dihentikan.", 409);
+  }
+  const registrationResult = await supabase.from("vaccination_registrations")
+    .select("id,participant_id,participant_name,nik,employee_id,mcu_id")
+    .eq("session_id", sessionId).limit(1000);
+  if (registrationResult.error) return fail(registrationResult.error.message, 500);
+  const regs = registrationResult.data || [];
+  if (regs.length >= 1000) return fail("Jumlah registrasi mencapai batas audit 1000. Hentikan dan gunakan SQL read-only.", 409);
+
+  const mapping = await getManualBatchMappings(supabase, 193, 49);
+  const existingItemsRead = await supabase.from("vaccination_registration_items")
+    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,active")
+    .eq("session_id", sessionId).limit(1000);
+  if (existingItemsRead.error) return fail(existingItemsRead.error.message, 500);
+  const existingItems = existingItemsRead.data || [];
+  if (existingItems.length >= 1000) return fail("Item registrasi mencapai batas audit 1000. Hentikan dan gunakan SQL read-only.", 409);
+  const itemsByRegistration = new Map<number, any[]>();
+  for (const item of existingItems) {
+    const registrationId = toInt(item.registration_id, 0);
+    if (!itemsByRegistration.has(registrationId)) itemsByRegistration.set(registrationId, []);
+    itemsByRegistration.get(registrationId)!.push(item);
+  }
+  const candidates: any[] = [];
+  const nameCounts = new Map<string, number>();
+  const existingByName = new Map<string, any[]>();
+  const existingByExternal = new Map<string, any[]>();
+  const legacyByExternal = new Map<string, Set<string>>();
+  for (const row of regs) {
+    const key = normalizedText(row.participant_name);
+    if (!existingByName.has(key)) existingByName.set(key, []);
+    existingByName.get(key)!.push(row);
+    const external = normalizedText(row.employee_id);
+    if (external) {
+      if (!existingByExternal.has(external)) existingByExternal.set(external, []);
+      existingByExternal.get(external)!.push(row);
+    }
+  }
+  for (const row of imported.rows) {
+    const name = normalizedText(row.participant_name);
+    nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+    const external = normalizedText(row.employee_id);
+    if (external) {
+      if (!legacyByExternal.has(external)) legacyByExternal.set(external, new Set<string>());
+      legacyByExternal.get(external)!.add(name);
+    }
+  }
+  for (const row of imported.rows) {
+    const name = normalizedText(row.participant_name);
+    const matches = existingByName.get(name) || [];
+    const mapped = buildItemsFromManualMappings(mapping, row.source_vaccine_rows || []);
+    const nik = normalizedText(row.nik);
+    const conflictingNik = matches.some((reg: any) => normalizedText(reg.nik) && nik && normalizedText(reg.nik) !== nik);
+    const identityConflict = Boolean(row.v629_identity_conflict || (nameCounts.get(name) || 0) > 1 || conflictingNik);
+    const observedItems = matches.length === 1 ? (itemsByRegistration.get(toInt(matches[0].id, 0)) || []).filter((x: any) => x.active !== false) : [];
+    const itemKey = (x: any) => `${toInt(x.vaccine_id, 0)}:${toInt(x.lot_id, 0)}:${toInt(x.dose_number, 1)}`;
+    const expectedItemKeys = new Set(mapped.items.map(itemKey));
+    const observedItemKeys = new Set(observedItems.map(itemKey));
+    const unmatchedObserved = observedItems.filter((item: any) => !expectedItemKeys.has(itemKey(item)));
+    const missingExpected = mapped.items.filter((item: any) => !observedItemKeys.has(itemKey(item)));
+    const hasProductMismatch = matches.length === 1 && (unmatchedObserved.length > 0 || missingExpected.length > 0);
+    const clinicalReview = matches.length === 1 && !identityConflict ?
+      (hasProductMismatch ? "MATCHED_REVIEW_PRODUCT_ATTRIBUTION" : "MATCHED_EXISTS") :
+      matches.length === 0 && !identityConflict && mapped.items.length > 0 ? "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" :
+      "MANUAL_IDENTITY_REVIEW";
+    const otherFamilyRegistrations = (existingByExternal.get(normalizedText(row.employee_id)) || [])
+      .filter((r: any) => !matches.some((m: any) => m.id === r.id))
+      .map((r: any) => ({ registrationId: r.id, participantName: r.participant_name }));
+    candidates.push({
+      name: clean(row.participant_name),
+      sourceRowIds: (row.source_vaccine_rows || []).map((r: any) => r.source_row_id),
+      matchedRegistrationIds: matches.map((r: any) => r.id),
+      sourceBatchNames: (row.source_vaccine_rows || []).map((r: any) => clean(r.vaccine_batch_name)),
+      mappedVaccineIds: mapped.items.map((v: any) => v.vaccine_id),
+      expectedItems: mapped.items.map((item: any) => ({ vaccineId: item.vaccine_id, lotId: item.lot_id, doseNumber: item.dose_number })),
+      observedActiveItems: observedItems.map((item: any) => ({ itemId: item.id, vaccineId: item.vaccine_id, lotId: item.lot_id, doseNumber: item.dose_number, status: item.status })),
+      unmatchedObservedItemIds: unmatchedObserved.map((item: any) => item.id),
+      missingExpectedVaccineIds: missingExpected.map((item: any) => item.vaccine_id),
+      existingRegistrationsWithSharedFamilyId: otherFamilyRegistrations,
+      unmappedBatchNames: mapped.unmapped,
+      sharedExternalIdWithOtherNames: (legacyByExternal.get(normalizedText(row.employee_id))?.size || 0) > 1,
+      auditStatus: clinicalReview,
+    });
+  }
+  return ok({
+    mode: "V629_READ_ONLY_PREVIEW",
+    sourceTable: imported.sourceTable,
+    sessionId, sourceId: 49,
+    importedSourceRows: imported.rows.reduce((n: number, row: any) => n + (row.source_vaccine_rows || []).length, 0),
+    personsGroupedByNameAndNik: imported.rows.length,
+    existingRegistrations: regs.length,
+    existingActiveItems: existingItems.filter((x: any) => x.active !== false).length,
+    missingCandidateCount: candidates.filter((x: any) => x.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT").length,
+    productAttributionReviewCount: candidates.filter((x: any) => x.auditStatus === "MATCHED_REVIEW_PRODUCT_ATTRIBUTION").length,
+    manualIdentityReviewCount: candidates.filter((x: any) => x.auditStatus === "MANUAL_IDENTITY_REVIEW").length,
+    sharedExternalGroupCount: Array.from(legacyByExternal.values()).filter((names) => names.size > 1).length,
+    advisory: "Preview bukan persetujuan untuk membuat registrasi. Item vaksin 223 existing harus direkonsiliasi sebelum pemulihan. Tidak ada SQL write.",
+    candidates,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -536,6 +674,21 @@ export async function POST(req: NextRequest) {
   const session = sessionResult.data || {};
   const sourceId = sourceIdInput || toInt(session.source_id, 0);
   if (!sourceId) return fail("Database corporate/vaksinasi wajib dipilih.");
+  // V629 PRODUCTION GUARD: session 193 already contains 223 legacy registrations.
+  // No POST import is permitted until per-person/per-vaccine attribution is audited.
+  // This check must happen before catalog mapping sync, registration or item writes.
+  if (sourceId === 49) {
+    const existingSource49 = await supabase.from("vaccination_registrations")
+      .select("id").eq("session_id", sessionId).limit(1);
+    if (existingSource49.error) return fail(existingSource49.error.message, 500);
+    if ((existingSource49.data || []).length > 0) {
+      return fail(
+        "V629 SAFETY STOP: import ulang Session BINUS yang sudah memiliki registrasi diblokir sampai item vaksin dan identitas direkonsiliasi. Tidak ada registrasi baru dibuat.",
+        409,
+        { v629PreviewUrl: sessionId === 193 ? "/api/vaccination/import-corporate?session_id=193&mode=v629-preview" : null },
+      );
+    }
+  }
 
   let manualMappings = new Map<string, ManualMappingItem>();
   let catalogMappingSync = { created: 0, updated: 0, sourceSessionIds: [] as number[] };
@@ -558,6 +711,9 @@ export async function POST(req: NextRequest) {
   }
 
   const imported = await fetchVaccinationSourceParticipants(supabase, sourceId, session);
+  if (imported.rows.some((row: any) => row.v629_identity_conflict)) {
+    return fail("V629: source import mengandung nama sama dengan identitas eksternal berbeda. Periksa data sebelum import; tidak ada data yang ditulis.", 409);
+  }
   if (!imported.rows.length) {
     return fail("Tidak menemukan peserta dari database corporate/vaksinasi yang dipilih untuk session/lokasi ini.", 404, {
       sourceId,
