@@ -143,7 +143,6 @@ export default function VaccinationRegisterPage() {
   const [v629Preview, setV629Preview] = useState<any | null>(null);
   const [v629PreviewLoading, setV629PreviewLoading] = useState(false);
   const [v629PreviewError, setV629PreviewError] = useState("");
-  const [v629PreviewSearch, setV629PreviewSearch] = useState("");
   const deepLinkEditHandled = useRef(false);
   // V603: ignore stale Healthday/Bazar responses when operators switch views.
   const latestRegisterLoad = useRef(0);
@@ -253,7 +252,6 @@ export default function VaccinationRegisterPage() {
   useEffect(() => {
     setV629Preview(null);
     setV629PreviewError("");
-    setV629PreviewSearch("");
   }, [form.sessionId, selectedSourceId]);
 
   // V571_VACCINATION_SOURCE_SCOPED_SESSION_SELECTION
@@ -1335,6 +1333,37 @@ export default function VaccinationRegisterPage() {
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
+  // V629.4: Session 193 only. Source records are SEARCH OPTIONS, not registrations.
+  // Reload on session/source change; no write and no automatic queue release.
+  useEffect(() => {
+    if (!v629NeedsReview) return;
+    let active = true;
+    const controller = new AbortController();
+    setV629PreviewLoading(true);
+    setV629PreviewError("");
+    void (async () => {
+      try {
+        const response = await fetch(
+          "/api/vaccination/import-corporate?session_id=193&mode=v629-preview",
+          { cache: "no-store", signal: controller.signal },
+        );
+        const json = await response.json();
+        if (!response.ok || !json?.ok || Number(json?.sessionId) !== 193 || Number(json?.sourceId) !== 49) {
+          throw new Error(json?.message || "Daftar peserta BINUS Anak belum tersedia.");
+        }
+        if (active) setV629Preview(json);
+      } catch (error: any) {
+        if (active) {
+          setV629Preview(null);
+          setV629PreviewError(String(error?.message || "Gagal membaca peserta BINUS Anak."));
+        }
+      } finally {
+        if (active) setV629PreviewLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [v629NeedsReview]);
+
   async function loadV629Preview() {
     if (!v629NeedsReview || v629PreviewLoading) return;
     setV629PreviewError("");
@@ -1697,18 +1726,7 @@ export default function VaccinationRegisterPage() {
                 <div className="mt-3 rounded-lg border bg-slate-50 p-3">
                   <p className="font-semibold">Sumber: {v629Preview.sourceTable || "-"} · Baris sumber: {v629Preview.importedSourceRows ?? "-"} · Kandidat: {v629Preview.personsGroupedByNameAndNik ?? "-"} · Registrasi: {v629Preview.existingRegistrations ?? "-"} · Perlu review: {v629Preview.missingCandidateCount ?? "-"}</p>
                   <p className="mt-1 text-[11px] text-amber-800">{v629Preview.sourceNote || "Angka kandidat bukan persetujuan pembuatan registrasi. Identitas dan item vaksin harus diverifikasi terlebih dahulu."}</p>
-                  <input className="mt-2 w-full rounded-lg border px-3 py-2 text-sm" placeholder="Cari nama dari hasil audit..." value={v629PreviewSearch} onChange={(e) => setV629PreviewSearch(e.target.value)} />
-                  <div className="mt-2 max-h-48 overflow-auto divide-y text-xs">
-                    {(Array.isArray(v629Preview.candidates) ? v629Preview.candidates : [])
-                      .filter((item: any) => String(item.name || "").toLowerCase().includes(v629PreviewSearch.trim().toLowerCase()))
-                      .slice(0, 80)
-                      .map((item: any, index: number) => (
-                        <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 py-2">
-                          <span className="font-semibold text-slate-800">{item.name || "(tanpa nama)"}</span>
-                          <span className="shrink-0 text-slate-600">{item.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "Perlu audit registrasi" : item.auditStatus === "MATCHED_EXISTS" ? "Registrasi ada" : "Perlu rekonsiliasi"}</span>
-                        </div>
-                      ))}
-                  </div>
+                  <p className="mt-2 text-[11px] font-semibold text-slate-600">Semua peserta sumber kini dapat dicari langsung lewat <strong>Registrasi Ulang → Peserta di Lokasi Ini</strong>. Peserta tanpa registrasi tetap perlu konfirmasi identitas dan vaksin saat datang.</p>
                 </div>
               ) : null}
             </details>
@@ -1774,6 +1792,11 @@ export default function VaccinationRegisterPage() {
               setForm={setForm}
               session={selectedSession}
               sessionRegistrations={registrations}
+              sessionCandidates={v629NeedsReview && Number(v629Preview?.sessionId) === 193 && Number(v629Preview?.sourceId) === 49
+                ? (Array.isArray(v629Preview?.candidates) ? v629Preview.candidates : [])
+                : []}
+              sessionCandidatesLoading={v629NeedsReview && v629PreviewLoading}
+              sessionCandidatesError={v629NeedsReview ? v629PreviewError : ""}
               onParticipantReady={openWalkinModal}
             />
 

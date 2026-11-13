@@ -120,12 +120,18 @@ export default function VaccinationParticipantMasterSearch({
   setForm,
   session,
   sessionRegistrations = [],
+  sessionCandidates = [],
+  sessionCandidatesLoading = false,
+  sessionCandidatesError = "",
   onParticipantReady,
 }: {
   form: any;
   setForm: any;
   session?: any;
   sessionRegistrations?: any[];
+  sessionCandidates?: any[];
+  sessionCandidatesLoading?: boolean;
+  sessionCandidatesError?: string;
   onParticipantReady?: () => void;
 }) {
   const [companies, setCompanies] = useState<any[]>([]);
@@ -355,7 +361,9 @@ export default function VaccinationParticipantMasterSearch({
       );
       if (keyword && !haystack.includes(keyword)) continue;
 
-      const key = sessionPersonKey(row);
+      const key = sessionId === 193
+        ? `child:${normalized(row?.participant_name)}|${normalized(row?.nik)}`
+        : sessionPersonKey(row);
       const current = grouped.get(key);
       // V602: when the same person has separate Bazar and Healthday rows,
       // select the registration for the operator's current service. Otherwise
@@ -367,12 +375,32 @@ export default function VaccinationParticipantMasterSearch({
       }
     }
 
+    // V629.4: add source participants NOT YET registered to the same search.
+    // Never equate shared BINUSIAN ID with a unique person identity.
+    // Keep existing registration rows unchanged and higher priority.
+    // Candidate list is provided only for the verified child Session 193.
+    if (sessionId === 193 && Array.isArray(sessionCandidates)) {
+      for (const [index, candidate] of sessionCandidates.entries()) {
+        const name = clean(candidate?.name);
+        const normalizedName = normalized(name);
+        if (!normalizedName || ["MATCHED_EXISTS", "MATCHED_REVIEW_PRODUCT_ATTRIBUTION"].includes(String(candidate?.auditStatus))) continue;
+        const key = `v629-source:${index}:${normalizedName}:${normalized(candidate?.nik)}`;
+        if (keyword && !normalized([name, candidate?.employeeId, candidate?.nik].join(" ")).includes(keyword)) continue;
+        grouped.set(key, {
+          id: key,
+          participant_name: name,
+          employee_id: clean(candidate?.employeeId),
+          nik: clean(candidate?.nik),
+          __v629SourceCandidate: candidate,
+        });
+      }
+    }
     return Array.from(grouped.values())
       .sort((a: any, b: any) =>
         clean(a?.participant_name).localeCompare(clean(b?.participant_name), "id"),
       )
       .slice(0, 60);
-  }, [sessionRegistrations, currentQuery, form?.serviceMode]);
+  }, [sessionId, sessionRegistrations, sessionCandidates, currentQuery, form?.serviceMode]);
 
   function applyParticipant(row: any, extra: any = {}) {
     const participantId = Number(row?.participantId || row?.participant_id || 0) || null;
@@ -475,6 +503,27 @@ export default function VaccinationParticipantMasterSearch({
         brand: clean(item?.brand || vaccine?.brand),
         status: clean(item?.status).toUpperCase(),
       }];
+    });
+  }
+
+  // V629.4: for a missing candidate, reuse the existing family-safe context
+  // verifier; do NOT write a registration, copy a relative's items, or release a queue.
+  function chooseSessionSourceCandidate(candidate: any) {
+    if (sessionId !== 193 || candidate?.auditStatus !== "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT") {
+      setError("Identitas ini memerlukan pemeriksaan petugas sebelum dapat dipilih.");
+      return;
+    }
+    setCurrentOpen(false);
+    setFamilyBindingOpen(false);
+    void loadParticipantContext({
+      name: clean(candidate?.name),
+      employeeId: clean(candidate?.employeeId),
+      nik: clean(candidate?.nik),
+      participantId: candidate?.sourceTable === "participants"
+        ? (Number(candidate?.participantId || 0) || null) : null,
+      companyName: clean(session?.company_name),
+      sourceType: "V629_CHILD_SOURCE_PREVIEW",
+      participantType: "DEPENDENT",
     });
   }
 
@@ -967,8 +1016,11 @@ export default function VaccinationParticipantMasterSearch({
           </div>
           <div className="mt-1 text-xs font-semibold text-slate-500">
             {sessionId
-              ? `${sessionRegistrations.length} peserta pada session terpilih · bisa dicari nama / ID / NIK`
+              ? (sessionId === 193 && sessionCandidates.length
+                ? `${sessionCandidates.length} peserta sumber · ${sessionRegistrations.length} sudah registrasi · cari nama / ID / NIK`
+                : `${sessionRegistrations.length} peserta pada session terpilih · bisa dicari nama / ID / NIK`)
               : "Pilih session terlebih dahulu."}
+            {sessionId === 193 && sessionCandidatesLoading ? " · Memuat daftar peserta..." : ""}
           </div>
           <input
             value={currentQuery}
@@ -979,14 +1031,20 @@ export default function VaccinationParticipantMasterSearch({
             placeholder="Cari peserta terdaftar di lokasi ini..."
             className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-emerald-400 disabled:bg-slate-100"
           />
+          {sessionId === 193 && sessionCandidatesError ? (
+            <p className="mt-2 text-xs font-semibold text-amber-800">Daftar peserta sumber belum tersedia. Registrasi existing tetap bisa dicari.</p>
+          ) : null}
           {sessionId && currentOpen ? (
             <div className="mt-2 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
               {currentSessionRows.map((row: any) => (
                 <button
                   type="button"
                   key={`current-${row.id}`}
-                  onClick={() => chooseCurrentRegistration(row)}
-                  className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-emerald-50"
+                  disabled={Boolean(row?.__v629SourceCandidate && row.__v629SourceCandidate.auditStatus !== "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT")}
+                  onClick={() => row?.__v629SourceCandidate
+                    ? chooseSessionSourceCandidate(row.__v629SourceCandidate)
+                    : chooseCurrentRegistration(row)}
+                  className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-sm font-black text-slate-900">{row.participant_name || "-"}</div>
@@ -996,9 +1054,15 @@ export default function VaccinationParticipantMasterSearch({
                         .join(" · ") || "Data session"}
                     </div>
                   </div>
-                  <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                    {String(row?.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
-                  </span>
+                  {row?.__v629SourceCandidate ? (
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${row.__v629SourceCandidate.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
+                      {row.__v629SourceCandidate.auditStatus === "POSSIBLY_MISSING_REVIEW_BEFORE_INSERT" ? "Belum registrasi" : "Perlu verifikasi"}
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700">
+                      {String(row?.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
+                    </span>
+                  )}
                 </button>
               ))}
               {!currentSessionRows.length ? (

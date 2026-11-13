@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -551,6 +552,7 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "register")) return fail("Akses registrasi vaksinasi ditolak.", 403);
   if (req.nextUrl.searchParams.get("mode") !== "v629-preview") {
     return fail("Mode tidak dikenali.", 400);
   }
@@ -639,6 +641,13 @@ export async function GET(req: NextRequest) {
       .map((r: any) => ({ registrationId: r.id, participantName: r.participant_name }));
     candidates.push({
       name: clean(row.participant_name),
+      // V629.4: read-only identity for the same-session search box.
+      // Only participants.id is a safe person ID; import row IDs are NOT person IDs.
+      participantId: imported.sourceTable === "participants" ? toInt(row.participant_id, 0) || null : null,
+      employeeId: clean(row.employee_id),
+      nik: clean(row.nik),
+      // No item is created by preview; registered benefits must be reviewed in the original flow.
+      sourceTable: imported.sourceTable,
       sourceRowIds: (row.source_vaccine_rows || []).map((r: any) => r.source_row_id),
       matchedRegistrationIds: matches.map((r: any) => r.id),
       sourceBatchNames: (row.source_vaccine_rows || []).map((r: any) => clean(r.vaccine_batch_name)),
