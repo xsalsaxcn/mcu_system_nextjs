@@ -37,6 +37,7 @@ type Person = {
   sourceType?: string;
   participantId?: number | null;
   historyPersonId?: number | null;
+  familyRole?: "PARENT" | "DEPENDENT";
   name: string;
   employeeId: string;
   nik?: string;
@@ -166,12 +167,17 @@ export default function BazarPublicRegistrationPage() {
     setLoading(true); setError(""); setMessage("");
     try {
       const json = await post({ action: "lookup", employeeId: id });
-      if (json.found && json.person) {
+      if (json.found && (json.person || (Array.isArray(json.choices) && json.choices.length > 0))) {
         setPerson(json.person);
         const family = Array.isArray(json.familyMembers) ? json.familyMembers : [];
-        setLinkedFamilyChoices(family.length ? [json.person, ...family] : []);
-        setStep(family.length ? "CHOOSE_PERSON" : "PRODUCTS");
-        setMessage(family.length ? "Pilih nama penerima vaksin. Employee ID keluarga boleh sama, tetapi pendaftarannya terpisah." : "Data ditemukan. Silakan pilih produk Bazar.");
+        const choices: Person[] = Array.isArray(json.choices) && json.choices.length
+          ? json.choices : family.length ? [json.person, ...family] : [json.person];
+        setLinkedFamilyChoices(choices.length > 1 ? choices : []);
+        setPerson(choices.length === 1 ? choices[0] : null);
+        setStep(choices.length > 1 ? "CHOOSE_PERSON" : "PRODUCTS");
+        setMessage(choices.length > 1
+          ? "Pilih penerima vaksin sesuai nama. BINUSIAN ID keluarga bukan bukti seseorang adalah Parent."
+          : "Data ditemukan. Silakan pilih produk Bazar.");
       } else {
         setForm((prev) => ({ ...prev, employeeId: id }));
         setStep("FORM");
@@ -281,7 +287,7 @@ export default function BazarPublicRegistrationPage() {
             <div className="mt-7 space-y-3">
               <h2 className="text-lg font-black text-slate-900">Siapa yang akan menerima vaksin?</h2>
               <p className="text-xs font-semibold text-slate-500">Pilih sesuai nama, bukan hanya Employee ID. Setiap anggota keluarga mempunyai pesanan dan riwayat masing-masing.</p>
-              {linkedFamilyChoices.map((member, index) => <button key={member.historyPersonId || `family-${index}`} type="button" onClick={() => { setPerson(member); setSelected({}); setQuantities({}); setStartingDoses({}); setStep("PRODUCTS"); }} className="w-full rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-left hover:border-emerald-400"><div className="font-black text-slate-900">{member.name}</div><div className="mt-1 text-xs font-semibold text-emerald-800">{index === 0 ? "Parent / Karyawan" : "Child / Family"} · {member.employeeId || employeeId}</div></button>)}
+              {linkedFamilyChoices.map((member, index) => <button key={`${member.historyPersonId || 0}-${member.participantId || 0}-${index}`} type="button" onClick={() => { setPerson(member); setSelected({}); setQuantities({}); setStartingDoses({}); setStep("PRODUCTS"); }} className="w-full rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-left hover:border-emerald-400"><div className="font-black text-slate-900">{member.name}</div><div className="mt-1 text-xs font-semibold text-emerald-800">{member.familyRole ? member.familyRole === "PARENT" ? "Karyawan Dewasa · calon Parent" : "Anak / Family" : index === 0 ? "Parent / Karyawan" : "Child / Family"} · {member.employeeId || employeeId}</div></button>)}
               <button type="button" onClick={() => { setStep("LOOKUP"); setLinkedFamilyChoices([]); setPerson(null); }} className="w-full rounded-xl border p-3 text-xs font-bold">Kembali ke pencarian</button>
             </div>
           ) : null}

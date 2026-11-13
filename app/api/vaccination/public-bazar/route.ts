@@ -452,6 +452,138 @@ function mergePerson(primary: any, secondary: any) {
   };
 }
 
+// V631: BINUS Child public Bazar identity selection is read-only until booking.
+// Source 49 is NOT sufficient: verify exact child Session metadata as well.
+const V631_CHILD_SESSIONS: Record<number, { area: string; date: string }> = {
+  190: { area: "surabaya", date: "2026-11-05" },
+  191: { area: "medan", date: "2026-11-11" },
+  192: { area: "bekasi", date: "2026-11-14" },
+  193: { area: "anggrek", date: "2026-11-14" },
+  194: { area: "bandung", date: "2026-11-26" },
+  195: { area: "malang", date: "2026-11-26" },
+  196: { area: "semarang", date: "2026-11-27" },
+};
+function isV631ChildSession(session: any): boolean {
+  const expected = V631_CHILD_SESSIONS[Number(session?.id || 0)];
+  const key = (v: unknown) => clean(v).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return Boolean(expected) && Number(session?.source_id || 0) === 49
+    && key(session?.session_name).includes("binus healthday anak")
+    && key(session?.location).includes(expected.area)
+    && clean(session?.session_date).slice(0, 10) === expected.date
+    && key(session?.company_name).includes("bina nusantara");
+}
+function v631SameHuman(a: any, b: any): boolean {
+  if (!historyNameKey(a?.name) || historyNameKey(a?.name) !== historyNameKey(b?.name)) return false;
+  const nikA = historyIdentityKey(a?.nik), nikB = historyIdentityKey(b?.nik);
+  if (nikA && nikB && nikA !== nikB) return false;
+  const bdA = clean(a?.birthDate).slice(0, 10), bdB = clean(b?.birthDate).slice(0, 10);
+  if (bdA && bdB && bdA !== bdB) return false;
+  const employeeA = historyIdentityKey(a?.employeeId), employeeB = historyIdentityKey(b?.employeeId);
+  return Boolean(employeeA && employeeA === employeeB);
+}
+function v631FromChildParticipant(row: any, session: any) {
+  return { ...operationalPerson(row, clean(session.company_name)),
+    familyRole: "DEPENDENT", sourceType: "DATABASE", historyPersonId: null };
+}
+
+async function v631ChildBazarChoices(supabase: any, session: any, employeeInput: string): Promise<any[]> {
+  // A public link is not proof of family identity; do not create/link relationships here.
+  if (!/^[a-zA-Z0-9_-]{3,48}$/.test(employeeInput)) throw new Error("BINUSIAN ID tidak valid.");
+  const employeeKey = historyIdentityKey(employeeInput);
+  const fields = ["employee_id", "employee_nik", "external_id", "mcu_id", "barcode_value"];
+  const sourceHits: any[] = [];
+  for (const field of fields) {
+    const result = await supabase.from("participants").select("*")
+      .eq("source_id", 49).eq(field, employeeInput).limit(120);
+    if (result.error) continue; // Some historical participant schemas omit optional ID fields.
+    sourceHits.push(...(result.data || []));
+  }
+  const children: any[] = [];
+  const seenIds = new Set<number>();
+  for (const row of sourceHits) {
+    const id = Number(row.id || 0);
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+    const child = v631FromChildParticipant(row, session);
+    if (historyIdentityKey(child.employeeId) !== employeeKey || !child.name) continue;
+    if (!children.some((other) => v631SameHuman(other, child))) children.push(child);
+  }
+  if (children.length > 100) throw new Error("Terlalu banyak data keluarga; hubungi admin registrasi.");
+
+  // Read-only company resolution: a public lookup must never INSERT company records.
+  const companyLookup = await supabase.from("vaccination_history_companies")
+    .select("id,company_name").eq("company_key", historyCompanyKey(session.company_name))
+    .eq("active", true).maybeSingle();
+  if (companyLookup.error) throw new Error(companyLookup.error.message);
+  const company = companyLookup.data || null;
+  let historyRows: any[] = [];
+  if (company?.id) {
+    const found = await supabase.from("vaccination_persons")
+      .select("id,participant_type,participant_name,employee_id,employee_key,nik,email,phone,birth_date,gender,active")
+      .eq("company_id", Number(company.id)).eq("employee_key", employeeKey)
+      .eq("active", true).limit(150);
+    if (found.error) throw new Error(found.error.message);
+    historyRows = found.data || [];
+  }
+  // Merge only a unique same-name historical DEPENDENT; never by shared ID alone.
+  for (const child of children) {
+    const matches = historyRows.filter((row: any) =>
+      clean(row.participant_type).toUpperCase() === "DEPENDENT" &&
+      v631SameHuman(child, historyPerson(row, clean(session.company_name))));
+    if (matches.length === 1) {
+      child.historyPersonId = Number(matches[0].id);
+      child.sourceType = "DATABASE + HISTORY";
+    }
+  }
+
+  // Verified Parent must originate from an explicit BINUS Dewasa SOURCE, not a
+  // guessed EMPLOYEE role on a child import. Adult source tables are read-only.
+  const allSources = await supabase.from("participant_sources")
+    .select("id,name,institution_name").limit(1500);
+  if (allSources.error) throw new Error(allSources.error.message);
+  const adultSourceIds = (allSources.data || []).filter((source: any) => {
+    const title = clean(source.name).toLowerCase();
+    const institution = clean(source.institution_name).toLowerCase();
+    return /(dewasa|adult)/.test(title) &&
+      /(binus|bina nusantara)/.test(`${title} ${institution}`) && Number(source.id) !== 49;
+  }).map((source: any) => Number(source.id)).filter((id: number) => id > 0);
+  const adultRows: any[] = [];
+  if (adultSourceIds.length) for (const field of fields) {
+    const result = await supabase.from("participants").select("*")
+      .in("source_id", adultSourceIds).eq(field, employeeInput).limit(100);
+    if (result.error) continue;
+    adultRows.push(...(result.data || []));
+  }
+  const distinctAdults: any[] = [];
+  const seenAdultIds = new Set<number>();
+  for (const row of adultRows) {
+    const participantId = Number(row.id || 0);
+    if (!participantId || seenAdultIds.has(participantId)) continue;
+    seenAdultIds.add(participantId);
+    const adult = { ...operationalPerson(row, clean(session.company_name)), familyRole: "PARENT" };
+    if (!adult.name || historyIdentityKey(adult.employeeId) !== employeeKey) continue;
+    if (children.some((child) => v631SameHuman(child, adult))) continue;
+    const matches = historyRows.filter((row: any) =>
+      clean(row.participant_type).toUpperCase() === "EMPLOYEE" &&
+      v631SameHuman(adult, historyPerson(row, clean(session.company_name))));
+    if (matches.length === 1) adult.historyPersonId = Number(matches[0].id);
+    if (!distinctAdults.some((other) => v631SameHuman(other, adult))) distinctAdults.push(adult);
+  }
+  // More than one distinct adult is ambiguous. No automatic family relationship.
+  const parent = distinctAdults.length === 1 ? distinctAdults[0] : null;
+  const choices = parent ? [parent, ...children] : [...children];
+  // Historical children outside the current source may be included only if already linked
+  // by an explicit active relationship to the verified parent.
+  if (parent?.historyPersonId) {
+    const linked = await linkedBazarFamilyMembers(supabase, session, parent);
+    for (const member of linked) {
+      const candidate = { ...member, familyRole: "DEPENDENT" };
+      if (!choices.some((other) => v631SameHuman(other, candidate))) choices.push(candidate);
+    }
+  }
+  return choices;
+}
+
 async function lookupByEmployeeId(supabase: any, session: any, employeeIdInput: string) {
   const employeeKey = historyIdentityKey(employeeIdInput);
   if (!employeeKey) return null;
@@ -742,6 +874,20 @@ export async function POST(req: NextRequest) {
     if (action === "lookup") {
       const employeeId = clean(body.employeeId || body.employee_id);
       if (!employeeId) return json({ ok: false, message: "NIP / Employee ID wajib diisi." }, 400);
+      if (isV631ChildSession(session)) {
+        const choices = await v631ChildBazarChoices(supabase, session, employeeId);
+        const safeChoices = choices.map((choice: any) => ({
+          participantId: Number(choice.participantId || 0) || null,
+          historyPersonId: Number(choice.historyPersonId || 0) || null,
+          name: clean(choice.name), employeeId,
+          familyRole: clean(choice.familyRole) === "PARENT" ? "PARENT" : "DEPENDENT",
+          companyName: clean(session.company_name),
+        }));
+        return json({ ok: true, found: safeChoices.length > 0,
+          person: safeChoices.length === 1 ? safeChoices[0] : null,
+          choices: safeChoices, familyMembers: [],
+          employeeId, companyName: clean(session.company_name) });
+      }
       const person = await lookupByEmployeeId(supabase, session, employeeId);
       const familyMembers = person ? await linkedBazarFamilyMembers(supabase, session, person) : [];
       // Never expose dependent NIK, phone, birth date or email on a public lookup.
@@ -753,6 +899,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "save-participant") {
+      if (isV631ChildSession(session)) {
+        return json({ ok: false,
+          message: "Profil baru BINUS Anak harus diverifikasi admin agar tidak salah dicatat sebagai Parent." }, 409);
+      }
       const person = await saveStandardPerson(supabase, session, body);
       return json({ ok: true, person, message: "Data peserta berhasil disimpan." });
     }
@@ -761,6 +911,27 @@ export async function POST(req: NextRequest) {
       let person = body.person || null;
       const employeeId = clean(person?.employeeId || body.employeeId || body.employee_id);
       if (!employeeId) return json({ ok: false, message: "NIP / Employee ID wajib diisi." }, 400);
+      if (isV631ChildSession(session)) {
+        // Re-resolve selected server-side IDs on each booking; client-provided names
+        // or shared family Employee ID alone do not authorize another child's booking.
+        const choices = await v631ChildBazarChoices(supabase, session, employeeId);
+        const pid = Number(person?.participantId || 0);
+        const hid = Number(person?.historyPersonId || 0);
+        const selected = choices.filter((entry: any) =>
+          (pid > 0 || hid > 0) &&
+          (pid <= 0 || Number(entry.participantId || 0) === pid) &&
+          (hid <= 0 || Number(entry.historyPersonId || 0) === hid));
+        if (selected.length !== 1) return json({ ok: false,
+          message: "Identitas penerima vaksin ambigu atau berubah. Pilih ulang satu nama yang benar." }, 409);
+        const booking = await createSelfBooking(supabase, session, selected[0],
+          Array.isArray(body.items) ? body.items : []);
+        return json({ ok: true,
+          message: booking.updatedExisting
+            ? "Pilihan Bazar diperbarui dan menunggu proses tim registrasi."
+            : "Pendaftaran Bazar berhasil dikirim dan menunggu proses tim registrasi.",
+          booking: { id: Number(booking.id || 0), status: clean(booking.booking_status) || "PENDING",
+            estimatedTotal: money(booking.estimated_total) } });
+      }
       const canonical = await lookupByEmployeeId(supabase, session, employeeId);
       if (!canonical) return json({ ok: false, message: "Identitas peserta tidak ditemukan di database perusahaan. Ulangi pencarian." }, 409);
       const requestedPersonId = Number(person?.historyPersonId || 0);

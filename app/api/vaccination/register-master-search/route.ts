@@ -62,6 +62,8 @@ function samePersonStrongMatch(left: any, right: any) {
   const rightName = normalized(right?.name);
   if (!leftName || leftName !== rightName) return false;
 
+  const leftNik = normalized(left?.nik), rightNik = normalized(right?.nik);
+  if (leftNik && rightNik && leftNik !== rightNik) return false;
   const leftRole = normalizedParticipantRole(left?.participantType);
   const rightRole = normalizedParticipantRole(right?.participantType);
   if (leftRole && rightRole && leftRole !== rightRole) return false;
@@ -335,6 +337,10 @@ export async function GET(req: NextRequest) {
 
     const mappedOperational = (operationalResult.data || []).map((row: any) => {
       const source = sourceMap.get(Number(row.source_id)) || {};
+      const childSourceName = normalized(source?.name);
+      const isVerifiedChildSource = Number(row.source_id) === 49
+        && group.key === "yayasan-bina-nusantara"
+        && (childSourceName.includes("anak") || childSourceName.includes("child"));
       return {
         sourceType: "DATABASE",
         sourceId: Number(row.source_id || 0) || null,
@@ -353,7 +359,8 @@ export async function GET(req: NextRequest) {
         phone: first(row.phone, row.no_hp, row.mobile, row.phone_number),
         department: first(row.department, row.departement, row.division, row.unit),
         companyName: group.name,
-        participantType: first(row.participant_type, row.employee_type, "EMPLOYEE"),
+        participantType: isVerifiedChildSource
+          ? "DEPENDENT" : first(row.participant_type, row.employee_type, "EMPLOYEE"),
         parentHistoryPersonId: null,
         parentName: "",
         parentEmployeeId: "",
@@ -438,6 +445,8 @@ export async function GET(req: NextRequest) {
       let matchIndex = mergedGroups.findIndex((candidateGroup) =>
         samePersonStrongMatch(candidateGroup.person, row) ||
         (normalized(candidateGroup.person?.name) === normalized(row?.name) &&
+          (!normalized(candidateGroup.person?.nik) || !normalized(row?.nik) ||
+            normalized(candidateGroup.person?.nik) === normalized(row?.nik)) &&
           Array.from(rowKeys).some((key) => candidateGroup.keys.has(key)) &&
           (!normalizedParticipantRole(candidateGroup.person?.participantType) ||
             !normalizedParticipantRole(row?.participantType) ||
@@ -464,7 +473,9 @@ export async function GET(req: NextRequest) {
           !normalizedParticipantRole(mergedGroup.person?.participantType) ||
           normalizedParticipantRole(candidate.person?.participantType) === normalizedParticipantRole(mergedGroup.person?.participantType);
         const overlaps = Array.from(candidate.keys).some((key) => mergedGroup.keys.has(key));
-        if (!sameName || !sameRole || !overlaps) continue;
+        const nikLeft = normalized(candidate.person?.nik);
+        const nikRight = normalized(mergedGroup.person?.nik);
+        if (!sameName || !sameRole || !overlaps || (nikLeft && nikRight && nikLeft !== nikRight)) continue;
         mergedGroup.person = mergePerson(mergedGroup.person, candidate.person);
         for (const key of candidate.keys) mergedGroup.keys.add(key);
         mergedGroup.sourceRows.push(...candidate.sourceRows);
