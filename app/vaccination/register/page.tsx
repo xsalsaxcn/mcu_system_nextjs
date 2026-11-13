@@ -30,6 +30,24 @@ type ProductItem = {
 type SortState = { key: string; direction: "asc" | "desc" };
 
 const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
+// V632.2A: One per-tab selected mode per Session; no participant information is stored.
+const REGISTER_MODE_MEMORY_KEY = "inharmony_vaccination_register_mode_per_session_v6322a";
+function readRegisterMode(sessionId: string | number): "HEALTHDAY" | "BAZAR" {
+  if (typeof window === "undefined" || !String(sessionId || "").trim()) return "HEALTHDAY";
+  try {
+    const modes = JSON.parse(window.sessionStorage.getItem(REGISTER_MODE_MEMORY_KEY) || "{}");
+    return modes && typeof modes === "object" && modes[String(sessionId)] === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+  } catch { return "HEALTHDAY"; }
+}
+function saveRegisterMode(sessionId: string | number, mode: "HEALTHDAY" | "BAZAR") {
+  if (typeof window === "undefined" || !String(sessionId || "").trim()) return;
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(REGISTER_MODE_MEMORY_KEY) || "{}");
+    const modes = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    modes[String(sessionId)] = mode;
+    window.sessionStorage.setItem(REGISTER_MODE_MEMORY_KEY, JSON.stringify(modes));
+  } catch { /* Storage blocked: page continues without persistence. */ }
+}
 
 const stageMap: Record<string, { label: string; cls: string }> = {
   IMPORTED: { label: "Belum Datang", cls: "bg-slate-900 text-white" },
@@ -781,6 +799,7 @@ export default function VaccinationRegisterPage() {
           vaccineId: firstVaccineId,
           lotId: usingSavedLock && saved.lotId ? String(saved.lotId) : (first.default_lot_id ? String(first.default_lot_id) : ""),
           companyName: usingSavedLock && saved.companyName ? String(saved.companyName) : (first.company_name || ""),
+          serviceMode: readRegisterMode(first.id),
         }));
       }
     }
@@ -1604,7 +1623,7 @@ export default function VaccinationRegisterPage() {
       vaccineId: nextVaccineId,
       lotId: selectedSession.default_lot_id ? String(selectedSession.default_lot_id) : (selectedSession.session_vaccines?.[0]?.lot_id ? String(selectedSession.session_vaccines[0].lot_id) : prev.lotId),
       companyName: selectedSession.company_name || prev.companyName,
-      serviceMode: "HEALTHDAY",
+      serviceMode: readRegisterMode(selectedSession.id),
       paymentMethod: "",
     }));
   }, [selectedSession?.id, contextLocked]);
@@ -1825,13 +1844,14 @@ export default function VaccinationRegisterPage() {
                   <div className="grid min-w-[320px] grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        saveRegisterMode(form.sessionId, "HEALTHDAY");
                         setForm((prev: any) => ({
                           ...(prev || {}),
                           serviceMode: "HEALTHDAY",
                           paymentMethod: "",
-                        }))
-                      }
+                        }));
+                      }}
                       className={`rounded-xl border px-4 py-3 text-sm font-black ${
                         activeQueueView === "HEALTHDAY"
                           ? "border-blue-500 bg-blue-600 text-white shadow-sm"
@@ -1842,13 +1862,14 @@ export default function VaccinationRegisterPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        saveRegisterMode(form.sessionId, "BAZAR");
                         setForm((prev: any) => ({
                           ...(prev || {}),
                           serviceMode: "BAZAR",
                           paymentMethod: "",
-                        }))
-                      }
+                        }));
+                      }}
                       className={`rounded-xl border px-4 py-3 text-sm font-black ${
                         activeQueueView === "BAZAR"
                           ? "border-violet-500 bg-violet-600 text-white shadow-sm"

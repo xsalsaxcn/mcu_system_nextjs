@@ -9,7 +9,7 @@
 // V148_5_LOCATION_DATE_SEARCH_AND_EXACT_ADMINISTERED_LABEL
 // V148_6_RECOVER_PRINT_AND_SESSION_LOCATIONS
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ProductDetail = {
   item_id?: number | null;
@@ -254,6 +254,10 @@ function stickerUrlFor(row: Row) {
     : `/vaccination/sticker/bulk?ids=${encodeURIComponent(ids.join(","))}`;
 }
 
+// V6322B_VALIDATION_SESSION_MEMORY_AND_GUARDED_AUTO_REFRESH
+// Preferences are saved per browser tab; no patient or medical data is persisted locally.
+const V6322B_SESSION_KEY = "inharmony_vaccination_validation_session_v6322b";
+const V6322B_POLL_INTERVAL_MS = 15000;
 export default function VaccinationValidationPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [movedHistoryRows, setMovedHistoryRows] = useState<Row[]>([]);
@@ -302,16 +306,39 @@ export default function VaccinationValidationPage() {
   const [stageCorrectionNote, setStageCorrectionNote] = useState("");
   const [stageCorrectionConfirmed, setStageCorrectionConfirmed] = useState(false);
   const [stageCorrectionBusy, setStageCorrectionBusy] = useState(false);
+  const [v6322bSessionReady, setV6322bSessionReady] = useState(false);
+  const [v6322bLastSynced, setV6322bLastSynced] = useState("");
+  const [v6322bSyncFailed, setV6322bSyncFailed] = useState(false);
+  const v6322bRequestSeq = useRef(0);
+  const v6322bLatestSession = useRef(sessionFilter);
+  const v6322bSilentInFlight = useRef(false);
+  const v6322bMutationInFlight = useRef(0);
+  const v6322bUnsafeToPoll = useRef(false);
+  v6322bLatestSession.current = sessionFilter;
+  // Never refresh over active item work, modal forms, or bulk selections.
+  v6322bUnsafeToPoll.current = loading || bulkBusy || moveBusy || itemActionBusy || stageCorrectionBusy ||
+    Boolean(cancelRowId || editingStageRow || moveRow || itemActionRow || stageCorrectionRow || selectedRows.length);
 
-  async function loadRows() {
-    setLoading(true);
-    setMessage("Memuat data validasi...");
+  async function loadRows(silent = false) {
+    if (silent && v6322bSilentInFlight.current) return;
+    const requestSeq = ++v6322bRequestSeq.current;
+    const requestedSession = sessionFilter;
+    if (silent) v6322bSilentInFlight.current = true;
+    else {
+      setLoading(true);
+      setMessage("Memuat data validasi...");
+    }
     try {
       const params = new URLSearchParams();
-      if (sessionFilter !== "all") params.set("session_id", sessionFilter);
+      if (requestedSession !== "all") params.set("session_id", requestedSession);
       const res = await fetch(`/api/vaccination/validation${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Gagal membaca validasi (HTTP ${res.status}).`);
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat validasi.");
+      // Ignore out-of-order requests and responses from an old Session.
+      if (requestSeq !== v6322bRequestSeq.current || requestedSession !== v6322bLatestSession.current) return;
+      // A background response must never overwrite an ongoing clinical action.
+      if (silent && (v6322bUnsafeToPoll.current || v6322bMutationInFlight.current > 0)) return;
       setRows(json.rows || []);
       setMovedHistoryRows(Array.isArray(json.moved_rows) ? json.moved_rows : []);
       setMoveCandidateRows(Array.isArray(json.move_candidates) ? json.move_candidates : []);
@@ -326,17 +353,63 @@ export default function VaccinationValidationPage() {
           )
         ) as string[]
       );
-      setMessage(`Data validasi dimuat: ${(json.rows || []).length} layanan.`);
+      setV6322bLastSynced(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      setV6322bSyncFailed(false);
+      if (!silent) setMessage(`Data validasi dimuat: ${(json.rows || []).length} layanan.`);
     } catch (error: any) {
-      setMessage(error?.message || "Gagal memuat validasi.");
+      if (requestSeq === v6322bRequestSeq.current && requestedSession === v6322bLatestSession.current) {
+        if (silent) setV6322bSyncFailed(true);
+        else setMessage(error?.message || "Gagal memuat validasi.");
+      }
     } finally {
-      setLoading(false);
+      if (silent) v6322bSilentInFlight.current = false;
+      else if (requestSeq === v6322bRequestSeq.current) setLoading(false);
     }
   }
 
+  // Restore only the selected Session ID, never medical records, on page reload.
   useEffect(() => {
-    loadRows();
-  }, [sessionFilter]);
+    try {
+      const saved = window.sessionStorage.getItem(V6322B_SESSION_KEY) || "";
+      if (/^[1-9][0-9]*$/.test(saved)) setSessionFilter(saved);
+    } catch { /* No storage permission: use manual selector as before. */ }
+    setV6322bSessionReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!v6322bSessionReady) return;
+    try {
+      if (sessionFilter === "all") window.sessionStorage.removeItem(V6322B_SESSION_KEY);
+      else window.sessionStorage.setItem(V6322B_SESSION_KEY, sessionFilter);
+    } catch { /* Preference persistence is optional. */ }
+  }, [sessionFilter, v6322bSessionReady]);
+
+  useEffect(() => {
+    if (!v6322bSessionReady) return;
+    void loadRows();
+  }, [sessionFilter, v6322bSessionReady]);
+
+  useEffect(() => {
+    if (!v6322bSessionReady || sessionFilter === "all") return;
+    const refreshWhenSafe = () => {
+      if (document.visibilityState !== "visible" || v6322bUnsafeToPoll.current ||
+          v6322bMutationInFlight.current > 0 || v6322bSilentInFlight.current) return;
+      const focused = document.activeElement;
+      // Do not interrupt active typing (search, notes or form fields).
+      if (focused instanceof HTMLTextAreaElement ||
+          (focused instanceof HTMLInputElement && !["checkbox", "radio", "button"].includes(focused.type)) ||
+          (focused instanceof HTMLElement && focused.isContentEditable)) return;
+      void loadRows(true);
+    };
+    const intervalId = window.setInterval(refreshWhenSafe, V6322B_POLL_INTERVAL_MS);
+    window.addEventListener("focus", refreshWhenSafe);
+    document.addEventListener("visibilitychange", refreshWhenSafe);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshWhenSafe);
+      document.removeEventListener("visibilitychange", refreshWhenSafe);
+    };
+  }, [sessionFilter, v6322bSessionReady]);
 
   const companyOptions = useMemo<string[]>(() =>
     Array.from(
@@ -455,6 +528,7 @@ export default function VaccinationValidationPage() {
       setMessage("Untuk transaksi Bazar gunakan Kelola Tindakan per item. Tidak ada perubahan data.");
       return;
     }
+    v6322bMutationInFlight.current += 1;
     setMessage("Mengubah status...");
     try {
       const res = await fetch("/api/vaccination/validation", {
@@ -468,6 +542,8 @@ export default function VaccinationValidationPage() {
       await loadRows();
     } catch (error: any) {
       setMessage(error?.message || "Gagal update status.");
+    } finally {
+      v6322bMutationInFlight.current = Math.max(0, v6322bMutationInFlight.current - 1);
     }
   }
 
@@ -941,6 +1017,10 @@ export default function VaccinationValidationPage() {
               ? `${recordOnlyMode ? "Pencatatan / Antrean Vendor" : "Antrean Internal"} · ${selectedSession.session_name}`
               : "Pilih Session untuk mengunci meja validasi pada satu event."}
           </div>
+          <div className="mt-1 text-xs font-semibold text-slate-500">
+            {sessionFilter === "all" ? "Pilih satu Session agar data dapat diperbarui otomatis." :
+              `Auto-update setiap 15 detik ketika aman${v6322bLastSynced ? ` · Sinkron ${v6322bLastSynced}` : ""}${v6322bSyncFailed ? " · Sinkronisasi terakhir gagal, akan dicoba ulang" : ""}.`}
+          </div>
         </div>
 
         <div className="mt-6 grid gap-3 lg:grid-cols-7">
@@ -957,7 +1037,7 @@ export default function VaccinationValidationPage() {
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Tanggal mulai" />
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Tanggal akhir" />
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={loadRows} className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
+            <button type="button" onClick={() => void loadRows()} className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
             <button type="button" onClick={() => runExport(allValidationShown, "semua-validasi")} className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">Export Semua Validasi</button>
           </div>
         </div>
