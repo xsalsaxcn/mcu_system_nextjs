@@ -53,6 +53,8 @@ export async function GET(req: NextRequest) {
     if (registrationResult.error) throw registrationResult.error;
     if ((registrationResult.data || []).length > 50) return fail("Terlalu banyak Registrasi cocok; gunakan nama lengkap peserta.", 409);
     const normCompany = String(company.data.company_key || "").toLowerCase();
+    const canonicalName = (value: unknown) => String(value || "").normalize("NFKD")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const registrationCandidates = (registrationResult.data || []).flatMap((reg: any) => {
       const session = Array.isArray(reg.session) ? reg.session[0] : reg.session;
       const normalized = String(session?.company_name || "").toLowerCase()
@@ -62,12 +64,23 @@ export async function GET(req: NextRequest) {
       // Family role of a registration is not authoritative for employment or parenthood.
       // Explicit selection is always revalidated by /family-bind before a write.
       if (!String(reg.participant_name || "").trim()) return [];
+      // A registration explicitly linked to an existing History profile is not a second person.
+      const alreadyLinked = candidates.find((h: any) => Number(h.id) === Number(reg.history_person_id || 0) &&
+        canonicalName(h.participant_name) === canonicalName(reg.participant_name));
+      if (alreadyLinked) return [];
+      // If name + personal NIK/email prove the same candidate, show just the History profile.
+      // Shared BINUSIAN ID alone MUST NOT trigger this shortcut.
+      const strong = candidates.filter((h: any) => canonicalName(h.participant_name) === canonicalName(reg.participant_name) &&
+        ((h.nik && reg.nik && String(h.nik).trim() === String(reg.nik).trim()) ||
+          (h.email && reg.email && String(h.email).trim().toLowerCase() === String(reg.email).trim().toLowerCase())));
+      if (strong.length === 1) return [];
       return [{
         id: Number(reg.id), registration_id: Number(reg.id), source: "REGISTRATION",
         participant_type: role === "DEPENDENT" ? "DEPENDENT" : role === "PARENT" ? "EMPLOYEE" : "UNVERIFIED",
         family_role_source: role || "UNVERIFIED",
         participant_name: reg.participant_name, employee_id: reg.employee_id,
         nik: reg.nik, email: reg.email, parents: [],
+        linked_history_person_id: Number(reg.history_person_id || 0) || null,
       }];
     });
     return ok({ candidates: [

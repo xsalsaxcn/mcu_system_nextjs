@@ -41,7 +41,9 @@ export default function VaccinationCompanyHistoryPage() {
   const [familySelected, setFamilySelected] = useState<any>(null);
   const [familyConfirmed, setFamilyConfirmed] = useState(false);
   const [familyExtraParent, setFamilyExtraParent] = useState(false);
-  const [familyRelationMode, setFamilyRelationMode] = useState<"PARENT_CHILD" | "CHILD_PARENT" | "SPOUSE">("PARENT_CHILD");
+  const [familyRelationMode, setFamilyRelationMode] = useState<"PARENT_CHILD" | "CHILD_PARENT" | "SPOUSE" | "SIBLING">("PARENT_CHILD");
+  const [siblingReady, setSiblingReady] = useState(false);
+  const [linkedSiblings, setLinkedSiblings] = useState<any[]>([]);
   const [familySchemaReady, setFamilySchemaReady] = useState(false);
   const [familyBusy, setFamilyBusy] = useState(false);
   const [familyMessage, setFamilyMessage] = useState("");
@@ -124,10 +126,16 @@ export default function VaccinationCompanyHistoryPage() {
     if (!detail?.person?.id || !detail?.company?.id) return;
     setFamilyManager({ companyId: Number(detail.company.id),
       currentId: Number(detail.person.id), currentName: String(detail.person.participant_name),
-      currentType: detail.person.participant_type });
+      currentType: detail.person.participant_type,
+      currentNik: String(detail.person.nik || ""), currentEmail: String(detail.person.email || ""),
+      currentEmployeeId: String(detail.person.employee_id || "") });
     setFamilyQuery(""); setFamilyCandidates([]); setFamilySelected(null);
     setFamilyRelationMode(detail.person.participant_type === "DEPENDENT" ? "CHILD_PARENT" : "PARENT_CHILD");
     setFamilyConfirmed(false); setFamilyExtraParent(false); setFamilyMessage("");
+    setSiblingReady(false); setLinkedSiblings([]);
+    void fetchJson(`/api/vaccination/history/family-sibling?company_id=${Number(detail.company.id)}&person_id=${Number(detail.person.id)}`)
+      .then((data) => { setSiblingReady(data?.schema_ready === true); setLinkedSiblings(data?.siblings || []); })
+      .catch(() => {setSiblingReady(false); setLinkedSiblings([]);});
     // The spouse link uses its own table: never encode spouse as a fake Parent/Child pair.
     void fetchJson(`/api/vaccination/history/family-spouse?company_id=${Number(detail.company.id)}&person_id=${Number(detail.person.id)}`)
       .then((data) => setFamilySchemaReady(data?.schema_ready === true))
@@ -140,13 +148,23 @@ export default function VaccinationCompanyHistoryPage() {
     try {
       const params = new URLSearchParams({ company_id: String(familyManager.companyId), q: familyQuery.trim() });
       const data = await fetchJson(`/api/vaccination/history/family-lookup?${params.toString()}`);
-      setFamilyCandidates((data.candidates || []).filter((c: any) => !(c.source === "HISTORY" && Number(c.id) === familyManager.currentId)));
+      const currentName = String(familyManager.currentName || "").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const all = (data.candidates || []).map((c: any) => {
+        const candidateName = String(c.participant_name || "").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        // Same full name must be manually resolved, especially when the same person is in two sources.
+        const sameName = Boolean(currentName && candidateName && currentName === candidateName);
+        const sameHistory = c.source === "HISTORY" && Number(c.id) === familyManager.currentId;
+        const linkedSelf = Number(c.linked_history_person_id || 0) === familyManager.currentId;
+        return { ...c, blockedAsSelf: sameName || sameHistory || linkedSelf };
+      });
+      setFamilyCandidates(all.filter((c: any) => !(c.source === "HISTORY" && Number(c.id) === familyManager.currentId)));
     } catch (e: any) { setFamilyCandidates([]); setFamilyMessage(String(e?.message || e)); }
     finally { setFamilyBusy(false); }
   }
 
   async function saveFamilyLink() {
     if (!familyManager || !familySelected || !familyConfirmed || !detail?.company?.company_key) return;
+    if (familySelected.blockedAsSelf) { setFamilyMessage("Profil ini mungkin orang yang sama dari sumber berbeda. Tidak boleh menautkan peserta ke dirinya sendiri."); return; }
     setFamilyBusy(true); setFamilyMessage("");
     const subject = { historyPersonId: familyManager.currentId, name: familyManager.currentName };
     const chosen = familySelected.source === "REGISTRATION"
@@ -154,14 +172,15 @@ export default function VaccinationCompanyHistoryPage() {
       : { historyPersonId: familySelected.id, name: familySelected.participant_name };
     try {
       const isSpouse = familyRelationMode === "SPOUSE";
-      if (isSpouse && (familySelected.source !== "HISTORY" || !familySchemaReady)) {
-        throw new Error("Pasangan harus dipilih dari dua profil History yang sudah diverifikasi. Skema Spouse harus tersedia sebelum disimpan.");
+      const isSibling = familyRelationMode === "SIBLING";
+      if ((isSpouse || isSibling) && (familySelected.source !== "HISTORY" || !(isSpouse ? familySchemaReady : siblingReady))) {
+        throw new Error(isSibling ? "Sibling hanya dapat ditautkan dari dua profil History terverifikasi setelah migrasi Sibling disetujui." : "Pasangan hanya dapat ditautkan dari dua profil History terverifikasi setelah migrasi Spouse disetujui.");
       }
       const parent = familyRelationMode === "CHILD_PARENT" ? chosen : subject;
       const dependent = familyRelationMode === "CHILD_PARENT" ? subject : chosen;
-      const data = await fetchJson(isSpouse ? "/api/vaccination/history/family-spouse" : "/api/vaccination/family-bind", {
+      const data = await fetchJson(isSibling ? "/api/vaccination/history/family-sibling" : isSpouse ? "/api/vaccination/history/family-spouse" : "/api/vaccination/family-bind", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isSpouse
+        body: JSON.stringify(isSpouse || isSibling
           ? { companyId: Number(familyManager.companyId), firstHistoryPersonId: Number(subject.historyPersonId),
               secondHistoryPersonId: Number(chosen.historyPersonId),
               firstName: subject.name, secondName: chosen.name, confirmRelationship: true }
@@ -172,7 +191,10 @@ export default function VaccinationCompanyHistoryPage() {
       await loadDetail(familyManager.currentId);
       await loadCompany(page, search, type);
       setFamilyCandidates([]); setFamilySelected(null); setFamilyQuery("");
-      if (isSpouse) await loadDetail(familyManager.currentId);
+      if (isSibling) {
+        const s = await fetchJson(`/api/vaccination/history/family-sibling?company_id=${Number(familyManager.companyId)}&person_id=${Number(familyManager.currentId)}`);
+        setLinkedSiblings(s?.siblings || []);
+      }
     } catch (e: any) { setFamilyMessage(String(e?.message || e)); }
     finally { setFamilyBusy(false); }
   }
@@ -550,11 +572,11 @@ export default function VaccinationCompanyHistoryPage() {
                   ))}
                   {(companyData?.operational_matches || []).map((r: any) => (
                     <tr key={`registration-${r.registration_id}`} className="align-top bg-amber-50/60 hover:bg-amber-50">
-                      <td className="p-3 font-black">{r.participant_name}<div className="mt-1 text-xs font-semibold text-amber-800">Registrasi · belum terhubung ke Master History</div></td>
+                      <td className="p-3 font-black">{r.participant_name}<div className="mt-1 text-xs font-semibold text-amber-800">Registrasi · tautan Master belum terverifikasi (bukan peserta baru)</div></td>
                       <td className="p-3"><div>{r.employee_id || "-"}</div>{r.nik ? <div className="text-xs text-slate-500">NIK {maskId(r.nik)}</div> : null}</td>
                       <td className="p-3">{r.email || "-"}</td>
                       <td className="p-3 text-xs font-bold text-amber-900">Profil Registrasi</td>
-                      <td className="p-3 text-xs text-slate-500">Belum diverifikasi</td>
+                      <td className="p-3 text-xs text-slate-500">Periksa kecocokan profil, NIK pribadi, dan email. ID keluarga saja tidak cukup.</td>
                       <td className="p-3"><div className="flex flex-wrap gap-1">{(r.benefit_names || []).map((v: string) => <span key={v} className="rounded bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">{v}</span>)}</div>
                         <div className="mt-2 text-xs">Validasi DONE: <b>{number(r.validation_done_count)}</b> · Item selesai: <b>{number(r.completed_item_count)}</b> · Record ADMINISTERED: <b>{number(r.administered_record_count)}</b></div>
                         {r.validation_warnings?.length ? <div className="mt-1 text-xs font-bold text-amber-800">Perlu audit record: {number(r.validation_warnings.length)} registrasi</div> : null}
@@ -570,7 +592,7 @@ export default function VaccinationCompanyHistoryPage() {
             </div>
 
             {companyData?.operational_matches?.length ? (
-              <p className="mt-3 text-xs font-semibold text-amber-900">Baris berwarna kuning adalah data Registrasi yang ditampilkan bersama hasil History agar mudah diperiksa. Baris ini <b>belum terhubung</b> ke profil Master History; tidak ada pembuatan profil atau penggabungan ID keluarga secara otomatis.</p>
+              <p className="mt-3 text-xs font-semibold text-amber-900">Baris berwarna kuning adalah data Registrasi yang ditampilkan bersama hasil History agar mudah diperiksa. Baris ini adalah layanan Registrasi yang <b>tautan identitasnya belum terverifikasi</b> ke profil Master. Orang yang sama dapat tampil dari dua sumber sampai identitas pribadi dibuktikan; tidak ada penyatuan ID keluarga atau perubahan record klinis otomatis.</p>
             ) : null}
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -837,13 +859,15 @@ export default function VaccinationCompanyHistoryPage() {
               <b>{familyManager.currentName}</b> · Profil History {familyManager.currentType}<br />
               <span className="text-slate-600">Tipe EMPLOYEE/DEPENDENT adalah kategori import, bukan bukti siapa ibu, ayah, suami atau istri. Hubungan dipilih eksplisit.</span>
             </div>
-            <fieldset className="mt-4 grid gap-2 sm:grid-cols-3">
-              {([['PARENT_CHILD','Peserta → Anak'],['CHILD_PARENT','Anak → Peserta'],['SPOUSE','Suami / Istri']] as const).map(([mode,label]) =>
+            <fieldset className="mt-4 grid gap-2 sm:grid-cols-2">
+              {([['PARENT_CHILD','Peserta → Anak'],['CHILD_PARENT','Anak → Peserta'],['SPOUSE','Suami / Istri'],['SIBLING','Saudara / Sibling']] as const).map(([mode,label]) =>
                 <label key={mode} className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-xs font-bold ${familyRelationMode === mode ? 'border-violet-500 bg-violet-50' : 'bg-white'}`}>
                   <input type="radio" name="family-relation-mode" checked={familyRelationMode === mode} onChange={() => {setFamilyRelationMode(mode);setFamilySelected(null);setFamilyConfirmed(false);setFamilyExtraParent(false);}} />{label}
                 </label>
               )}
             </fieldset>
+            {familyRelationMode === "SIBLING" && !siblingReady ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Relasi Sibling dapat dibaca dari Parent bersama. Penyimpanan Sibling eksplisit belum aktif sampai migrasi V6342 diverifikasi dan disetujui administrator. Tidak akan membuat Parent palsu.</p> : null}
+            {linkedSiblings.length ? <div className="mt-3 rounded-xl bg-sky-50 p-3 text-xs font-semibold text-sky-900"><b>Saudara yang sudah terdeteksi:</b> {linkedSiblings.map((v: any) => `${v.participant_name} (${v.source === "SHARED_PARENT" ? "Parent bersama" : "Relasi eksplisit"})`).join(", ")}</div> : null}
             {familyRelationMode === "SPOUSE" && !familySchemaReady ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Penyimpanan Suami/Istri belum aktif sampai migrasi tabel Family Spouse V6341 diverifikasi di staging dan dipasang oleh admin. Tidak akan membuat relasi Parent/Child palsu.</p> : null}
             <div className="mt-4 flex gap-2">
               <input value={familyQuery} onChange={e => setFamilyQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void searchFamilyCandidates(); }} placeholder="Cari nama lengkap atau NIP / NIK" className="min-w-0 flex-1 rounded-xl border px-3 py-2" />
@@ -852,25 +876,26 @@ export default function VaccinationCompanyHistoryPage() {
             <p className="mt-2 text-xs text-slate-500">Kandidat berasal dari Master History atau Registrasi di perusahaan yang sama. Pilih berdasarkan nama dan bukti identitas; BINUSIAN ID keluarga saja tidak cukup. Untuk kandidat Registrasi, profil History baru hanya dapat dibuat setelah konfirmasi dan validasi server.</p>
             <div className="mt-3 max-h-52 space-y-2 overflow-y-auto">
               {familyCandidates.map((c: any) => (
-                <button key={`${c.source || "HISTORY"}-${c.id}`} type="button" onClick={() => { setFamilySelected(c); setFamilyConfirmed(false); setFamilyExtraParent(false); }} className={`block w-full rounded-xl border p-3 text-left text-sm ${familySelected?.id === c.id && familySelected?.source === c.source ? "border-violet-600 bg-violet-50" : "bg-white"}`}>
+                <button key={`${c.source || "HISTORY"}-${c.id}`} type="button" disabled={c.blockedAsSelf || ((familyRelationMode === "SPOUSE" || familyRelationMode === "SIBLING") && c.source !== "HISTORY")} onClick={() => { setFamilySelected(c); setFamilyConfirmed(false); setFamilyExtraParent(false); }} className={`block w-full rounded-xl border p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${familySelected?.id === c.id && familySelected?.source === c.source ? "border-violet-600 bg-violet-50" : "bg-white"}`}>
                   <b>{c.participant_name}</b> · {c.source === "REGISTRATION" ? `Registrasi #${c.registration_id} (belum tentu ada di Master History)` : `History #${c.id}`}<div className="text-xs text-slate-500">{c.employee_id || c.nik || c.email || "Identitas sekunder tidak tersedia"}</div>
+                  {c.blockedAsSelf ? <div className="mt-1 text-xs font-bold text-rose-700">Kemungkinan profil yang sama — tidak dapat dipilih sebagai anggota keluarganya sendiri.</div> : null}
                   {c.parents?.length ? <div className="mt-1 text-xs text-amber-700">Parent tercatat: {c.parents.map((p: any) => p.name).join(", ")}</div> : null}
                 </button>
               ))}
             </div>
             {familySelected ? <div className="mt-4 rounded-xl border p-4 text-sm">
-              <b>Konfirmasi relasi:</b> {familyRelationMode === "SPOUSE" ? `${familyManager.currentName} ↔ ${familySelected.participant_name}` : familyRelationMode === "CHILD_PARENT" ? `${familySelected.participant_name} (orang tua) → ${familyManager.currentName} (anak)` : `${familyManager.currentName} (orang tua) → ${familySelected.participant_name} (anak)`}
-              {familyRelationMode !== "SPOUSE" && ((familyRelationMode === "CHILD_PARENT" ? detail?.parents?.length : familySelected.parents?.length) || 0) > 0 ?
+              <b>Konfirmasi relasi:</b> {(familyRelationMode === "SPOUSE" || familyRelationMode === "SIBLING") ? `${familyManager.currentName} ↔ ${familySelected.participant_name} (${familyRelationMode === "SIBLING" ? "saudara" : "pasangan"})` : familyRelationMode === "CHILD_PARENT" ? `${familySelected.participant_name} (orang tua) → ${familyManager.currentName} (anak)` : `${familyManager.currentName} (orang tua) → ${familySelected.participant_name} (anak)`}
+              {familyRelationMode !== "SPOUSE" && familyRelationMode !== "SIBLING" && ((familyRelationMode === "CHILD_PARENT" ? detail?.parents?.length : familySelected.parents?.length) || 0) > 0 ?
                 <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={familyExtraParent} onChange={e => setFamilyExtraParent(e.target.checked)} className="mt-1" />
                   <span>Tambahkan sebagai Parent kedua tanpa mengganti Parent utama. Maksimal 2 Parent aktif. Periksa dulu bahwa keduanya benar orang tua/wali dari anak ini.</span></label> : null}
-              {familySelected.source === "REGISTRATION" ? <p className="mt-2 text-xs font-bold text-amber-800">Kandidat Registrasi belum tentu berada di Master History. Alur Parent/Child lama dapat membuat profil History baru hanya setelah tombol Simpan dan verifikasi server. Hubungan Suami/Istri dan Parent kedua mensyaratkan dua profil History yang sudah ada.</p> : null}
+              {familySelected.source === "REGISTRATION" ? <p className="mt-2 text-xs font-bold text-amber-800">Kandidat Registrasi belum tentu berada di Master History. Alur Parent/Child lama dapat membuat profil History baru hanya setelah tombol Simpan dan verifikasi server. Hubungan Suami/Istri, Sibling, dan Parent kedua mensyaratkan dua profil History yang sudah ada.</p> : null}
               <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={familyConfirmed} onChange={e => setFamilyConfirmed(e.target.checked)} className="mt-1" />
                 <span>Saya sudah memeriksa nama dan identitas kedua peserta serta mengonfirmasi hubungan keluarga ini.</span></label>
             </div> : null}
             {familyMessage ? <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">{familyMessage}</div> : null}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setFamilyManager(null)} className="rounded-xl border px-4 py-2 text-sm font-bold">Batal</button>
-              <button type="button" onClick={() => void saveFamilyLink()} disabled={!familySelected || !familyConfirmed || familyBusy || ((familyExtraParent || familyRelationMode === "SPOUSE") && familySelected.source === "REGISTRATION") || (familyRelationMode === "SPOUSE" && !familySchemaReady)} className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{familyBusy ? "Memeriksa..." : "Simpan Hubungan"}</button>
+              <button type="button" onClick={() => void saveFamilyLink()} disabled={!familySelected || !familyConfirmed || familyBusy || ((familyExtraParent || familyRelationMode === "SPOUSE" || familyRelationMode === "SIBLING") && familySelected.source === "REGISTRATION") || (familyRelationMode === "SPOUSE" && !familySchemaReady) || (familyRelationMode === "SIBLING" && !siblingReady) || Boolean(familySelected.blockedAsSelf)} className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{familyBusy ? "Memeriksa..." : "Simpan Hubungan"}</button>
             </div>
           </section>
         </div>
