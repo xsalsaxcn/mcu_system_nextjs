@@ -13,6 +13,22 @@ import { vaccinationDependentsForEmployee } from "@/lib/vaccination/historyFamil
 export const dynamic = "force-dynamic";
 
 const SYSTEM_PAGE_LIMIT = 200;
+const V6338_READ_PAGE = 800;
+
+// Read-only pagination: PostgREST caps result windows, so a single .limit(10000)
+// can silently omit newer services from corporate history when many rows exist.
+async function readAllPages(build: () => any, maxRows: number) {
+  const rows: any[] = [];
+  while (rows.length < maxRows) {
+    const result = await build().range(rows.length, rows.length + V6338_READ_PAGE - 1);
+    if (result.error) throw new Error(result.error.message);
+    const batch = result.data || [];
+    rows.push(...batch);
+    if (batch.length < V6338_READ_PAGE) return rows;
+  }
+  throw new Error(`History query reached guarded ${maxRows}-row limit. Use narrower company scope instead of silently displaying partial history.`);
+}
+
 
 function companyHintMatches(companyKey: string, hint: unknown) {
   if (!companyKey || companyKey === "unknown-company") return false;
@@ -68,7 +84,9 @@ function serviceKey(service: any) {
 function mergeServices(values: any[]) {
   const map = new Map<string, any>();
   for (const service of values) {
-    const key = serviceKey(service);
+    // A registration benefit and a clinical vaccination record are different
+    // facts, even when vaccine/date/lot match. Do not collapse them together.
+    const key = service.source === "SYSTEM_BENEFIT" ? `benefit:${service.id}` : serviceKey(service);
     const existing = map.get(key);
     if (!existing || (existing.source === "SYSTEM" && service.source === "HISTORY_IMPORT")) {
       map.set(key, service);
@@ -100,8 +118,13 @@ function personScore(person: any, parent: any, registration: any) {
   const regEmployee = identity(registration?.employee_id || registration?.mcu_id);
   const regEmail = email(registration?.email);
 
-  let score = 0;
-  if (regName && same(personName, regName)) score += 50;
+  // Shared BINUSIAN ID is common within a family. Never attach a service to
+  // the wrong child/parent solely because employee_id is shared.
+  if (!regName || !same(personName, regName)) return 0;
+  const explicitPersonId = Number(registration?.history_person_id || 0);
+  if (explicitPersonId) return explicitPersonId === Number(person?.id) ? 1000 : 0;
+  let score = 50;
+
   if (regNik && same(personNik, regNik)) score += 120;
   if (regEmployee && same(personEmployee, regEmployee)) score += 110;
   if (regEmail && same(personEmail, regEmail)) score += 100;
@@ -121,37 +144,50 @@ function personScore(person: any, parent: any, registration: any) {
   return score;
 }
 
-async function loadSystemRowsForCompany(supabase: any, companyKey: string) {
-  const sessionsResult = await supabase
-    .from("vaccination_sessions")
-    .select("id,session_name,company_name,source_name,location,session_date")
-    .order("id", { ascending: false })
-    .limit(5000);
-  if (sessionsResult.error) throw new Error(sessionsResult.error.message);
-
-  const sessions = (sessionsResult.data || []).filter((session: any) =>
+async function loadSystemRowsForCompany(supabase: any, companyKey: string, companyId: number) {
+  const sessionRows = await readAllPages(
+    () => supabase.from("vaccination_sessions")
+      .select("id,session_name,company_name,source_name,location,session_date")
+      .order("id", { ascending: false }),
+    5600,
+  );
+  const sessions = sessionRows.filter((session: any) =>
     [session.company_name, session.source_name, session.session_name].some((hint) => companyHintMatches(companyKey, hint)),
   );
-  if (!sessions.length) return [];
-
-  const sessionById = new Map<number, any>();
+  // Explicit person links are authoritative even when operational session
+  // labels differ from the imported History Company label.
+  const sessionById = new Map<number, any>(sessionRows.map((row: any) => [Number(row.id), row]));
   const sessionIds: number[] = [];
   for (const session of sessions) {
     const id = Number(session.id);
     if (!id) continue;
     sessionIds.push(id);
-    sessionById.set(id, session);
   }
 
   const registrations: any[] = [];
   for (const ids of chunks(sessionIds)) {
-    const result = await supabase
-      .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,email,company_name")
-      .in("session_id", ids)
-      .limit(10000);
-    if (result.error) throw new Error(result.error.message);
-    registrations.push(...(result.data || []));
+    registrations.push(...await readAllPages(
+      () => supabase.from("vaccination_registrations")
+        .select("id,session_id,participant_name,employee_id,nik,email,company_name,history_person_id,registered_at,patient_service_status,queue_status,bazar_queue_status,validation_status,payment_method,payment_price")
+        .in("session_id", ids).order("id", { ascending: true }),
+      20800,
+    ));
+  }
+  // Read any registration explicitly linked to a person in this History
+  // company. This covers the Agung case where the Registrasi modal has
+  // matched via registration relation but Company History misses the session.
+  const personIds = (await readAllPages(
+    () => supabase.from("vaccination_persons").select("id")
+      .eq("company_id", companyId).eq("active", true).order("id", { ascending: true }),
+    20800,
+  )).map((row: any) => Number(row.id)).filter(Boolean);
+  for (const ids of chunks(personIds)) {
+    registrations.push(...await readAllPages(
+      () => supabase.from("vaccination_registrations")
+        .select("id,session_id,participant_name,employee_id,nik,email,company_name,history_person_id,registered_at,patient_service_status,queue_status,bazar_queue_status,validation_status,payment_method,payment_price")
+        .in("history_person_id", ids).order("id", { ascending: true }),
+      20800,
+    ));
   }
   if (!registrations.length) return [];
 
@@ -160,31 +196,38 @@ async function loadSystemRowsForCompany(supabase: any, companyKey: string) {
   for (const registration of registrations) {
     const id = Number(registration.id);
     if (!id) continue;
-    registrationIds.push(id);
+    if (!registrationById.has(id)) registrationIds.push(id);
     registrationById.set(id, registration);
   }
 
-  const records: any[] = [];
+  const rows: any[] = [];
   for (const ids of chunks(registrationIds)) {
-    const result = await supabase
-      .from("vaccination_records")
-      .select("id,registration_id,session_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,next_due_date,notes,status")
-      .in("registration_id", ids)
-      .order("administered_at", { ascending: false })
-      .limit(10000);
-    if (result.error) throw new Error(result.error.message);
-    records.push(...(result.data || []));
+    const records = await readAllPages(
+      () => supabase.from("vaccination_records")
+        .select("id,registration_id,session_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,next_due_date,notes,status")
+        .in("registration_id", ids).order("id", { ascending: true }),
+      5600,
+    );
+    for (const record of records) {
+      const registration = registrationById.get(Number(record.registration_id));
+      if (registration) rows.push({ record, registration, session: sessionById.get(Number(registration.session_id)) || null });
+    }
+    const items = await readAllPages(
+      () => supabase.from("vaccination_registration_items")
+        .select("id,registration_id,service_mode,status,active,payment_method,sales_price_snapshot,lot_id,lot:vaccination_vaccine_lots(id,lot_number),vaccine:vaccination_vaccines(id,name,brand)")
+        .in("registration_id", ids).eq("active", true).order("id", { ascending: true }),
+      5600,
+    );
+    for (const item of items) {
+      const registration = registrationById.get(Number(item.registration_id));
+      if (registration) rows.push({ item, registration, session: sessionById.get(Number(registration.session_id)) || null });
+    }
   }
-
-  return records.map((record: any) => ({
-    record,
-    registration: registrationById.get(Number(record.registration_id)) || null,
-    session: sessionById.get(Number(record.session_id)) || null,
-  })).filter((row: any) => row.registration);
+  return rows;
 }
 
 function systemServicesForPerson(person: any, parent: any, systemRows: any[]) {
-  const matches = systemRows.filter((row) => personScore(person, parent, row.registration) >= 100);
+  const matches = systemRows.filter((row) => row.record && personScore(person, parent, row.registration) >= 100);
   return matches.map(({ record, session }: any) => ({
     id: `system-${record.id}`,
     service_date: dateOnly(record.administered_at),
@@ -197,9 +240,41 @@ function systemServicesForPerson(person: any, parent: any, systemRows: any[]) {
     next_due_date: record.next_due_date || null,
     notes: historyText(record.notes),
     administered_by: historyText(record.administered_by),
+    record_status: historyText(record.status),
     source: "SYSTEM",
-    source_label: "Sistem Saat Ini",
+    source_label: "Record Sistem",
   }));
+}
+
+function systemBenefitsForPerson(person: any, parent: any, systemRows: any[]) {
+  return systemRows.filter((row) => row.item && personScore(person, parent, row.registration) >= 100)
+    .map(({ item, registration, session }: any) => {
+      const vaccine = Array.isArray(item.vaccine) ? item.vaccine[0] : item.vaccine;
+      const lot = Array.isArray(item.lot) ? item.lot[0] : item.lot;
+      const mode = String(item.service_mode || registration.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      return {
+        id: `benefit-${item.id}`,
+        service_date: dateOnly(registration.registered_at || session?.session_date),
+        service_category: "VACCINATION",
+        service_name: historyText(vaccine?.name) || "Vaksinasi",
+        product_brand: historyText(vaccine?.brand),
+        dose_number: null,
+        lot_number: historyText(lot?.lot_number),
+        location: historyText(session?.location || session?.session_name),
+        next_due_date: null,
+        notes: "",
+        source: "SYSTEM_BENEFIT",
+        source_label: "Benefit Registrasi",
+        service_mode: mode,
+        item_status: historyText(item.status),
+        registration_status: historyText(mode === "BAZAR" ? registration.bazar_queue_status : registration.queue_status),
+        validation_status: historyText(registration.validation_status),
+        payment_method: historyText(item.payment_method || registration.payment_method),
+        payment_amount: Number(item.sales_price_snapshot ?? registration.payment_price ?? 0),
+        registration_id: Number(registration.id),
+        item_id: Number(item.id),
+      };
+    });
 }
 
 async function parentMapForDependents(supabase: any, dependentIds: number[]) {
@@ -326,9 +401,10 @@ export async function GET(req: NextRequest) {
         source: "HISTORY_IMPORT",
         source_label: "History Import",
       }));
-      const systemRows = await loadSystemRowsForCompany(supabase, String(company.company_key));
+      const systemRows = await loadSystemRowsForCompany(supabase, String(company.company_key), companyId);
       const current = systemServicesForPerson(person, parent, systemRows);
-      const services = mergeServices([...historical, ...current]);
+      const benefits = systemBenefitsForPerson(person, parent, systemRows);
+      const services = mergeServices([...historical, ...benefits, ...current]);
 
       return ok({
         company,
@@ -337,11 +413,13 @@ export async function GET(req: NextRequest) {
         dependents,
         historical,
         current,
+        benefits,
         services,
         summary: {
           total: services.length,
           history: historical.length,
           system: current.length,
+          system_benefits: benefits.length,
           unique_benefits: Array.from(new Set(services.map(benefitLabel))).length,
         },
       });
@@ -380,7 +458,7 @@ export async function GET(req: NextRequest) {
 
     const dependentIds = persons.filter((row: any) => row.participant_type === "DEPENDENT").map((row: any) => Number(row.id));
     const parentMap = await parentMapForDependents(supabase, dependentIds);
-    const systemRows = await loadSystemRowsForCompany(supabase, String(company.company_key));
+    const systemRows = await loadSystemRowsForCompany(supabase, String(company.company_key), companyId);
 
     const historyByPerson = new Map<number, any[]>();
     for (const service of historyServices) {
@@ -393,7 +471,8 @@ export async function GET(req: NextRequest) {
       const parent = parentMap.get(Number(person.id)) || null;
       const historical = historyByPerson.get(Number(person.id)) || [];
       const current = systemServicesForPerson(person, parent, systemRows);
-      const services = mergeServices([...historical, ...current]);
+      const registeredBenefits = systemBenefitsForPerson(person, parent, systemRows);
+      const services = mergeServices([...historical, ...registeredBenefits, ...current]);
       const benefits = Array.from(new Set(services.map(benefitLabel)));
       return {
         ...person,
@@ -401,6 +480,7 @@ export async function GET(req: NextRequest) {
         service_count: services.length,
         history_count: historical.length,
         system_count: current.length,
+        system_benefit_count: registeredBenefits.length,
         benefit_names: benefits,
         last_service_date: services[0]?.service_date || "",
         last_service_name: services[0] ? benefitLabel(services[0]) : "",
@@ -429,7 +509,8 @@ export async function GET(req: NextRequest) {
         persons: personCount.count || 0,
         dependents: dependentCount.count || 0,
         history_services: serviceCount.count || 0,
-        system_records: systemRows.length,
+        system_records: systemRows.filter((row: any) => Boolean(row.record)).length,
+        system_benefits: systemRows.filter((row: any) => Boolean(row.item)).length,
       },
     });
   } catch (error: any) {

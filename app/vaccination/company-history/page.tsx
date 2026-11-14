@@ -340,7 +340,7 @@ export default function VaccinationCompanyHistoryPage() {
             ["Perusahaan", globalSummary.companies],
             ["Master Peserta", globalSummary.persons],
             ["Anak / Tanggungan", globalSummary.dependents],
-            ["History Benefit", globalSummary.history_services],
+            ["History Import", globalSummary.history_services],
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-2xl border bg-white p-5 shadow-sm">
               <div className="text-xs font-black uppercase text-slate-500">{label}</div>
@@ -422,12 +422,13 @@ export default function VaccinationCompanyHistoryPage() {
               </div>
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               {[
                 ["Peserta", companyData?.summary?.persons],
                 ["Anak / Tanggungan", companyData?.summary?.dependents],
                 ["History Import", companyData?.summary?.history_services],
                 ["Record Sistem", companyData?.summary?.system_records],
+                ["Benefit Registrasi", companyData?.summary?.system_benefits],
               ].map(([label, value]) => (
                 <div key={String(label)} className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-xs font-black uppercase text-slate-500">{label}</div>
@@ -635,11 +636,12 @@ export default function VaccinationCompanyHistoryPage() {
             </div>
 
             <div className="space-y-5 p-5">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 {[
-                  ["Total Benefit", detail.summary?.total],
+                  ["Total Entri Riwayat", detail.summary?.total],
                   ["History Import", detail.summary?.history],
                   ["Record Sistem", detail.summary?.system],
+                  ["Benefit Registrasi", detail.summary?.system_benefits],
                   ["Jenis Benefit", detail.summary?.unique_benefits],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-2xl border bg-slate-50 p-4"><div className="text-xs font-black uppercase text-slate-500">{label}</div><div className="mt-1 text-2xl font-black">{number(value)}</div></div>
@@ -666,13 +668,13 @@ export default function VaccinationCompanyHistoryPage() {
               </div>
 
               <div>
-                <h4 className="text-lg font-black text-slate-900">Benefit / Layanan yang Sudah Diambil</h4>
+                <h4 className="text-lg font-black text-slate-900">Riwayat Benefit dan Status Layanan</h4>
                 <div className="mt-3 space-y-3">
                   {(detail.services || []).map((service: any) => (
                     <div key={`${service.source}-${service.id}`} className="rounded-2xl border p-4">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${service.source === "SYSTEM" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>{service.source_label}</span>
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${service.source === "SYSTEM" ? "bg-emerald-100 text-emerald-800" : service.source === "SYSTEM_BENEFIT" ? "bg-violet-100 text-violet-800" : "bg-blue-100 text-blue-800"}`}>{service.source_label}</span>
                           <div className="mt-2 text-lg font-black text-slate-900">{serviceLabel(service)}</div>
                           <div className="mt-1 text-sm font-semibold text-slate-500">{date(service.service_date)}{service.location ? ` · ${service.location}` : ""}</div>
                         </div>
@@ -683,13 +685,21 @@ export default function VaccinationCompanyHistoryPage() {
                         {service.lot_number ? <span>Lot {service.lot_number}</span> : null}
                         {service.administered_by ? <span>Petugas: {service.administered_by}</span> : null}
                         {service.source_filename ? <span>Sumber: {service.source_filename}</span> : null}
+                        {service.source === "SYSTEM_BENEFIT" ? <>
+                          <span>Layanan: {service.service_mode === "BAZAR" ? "Bazar" : "Healthday"}</span>
+                          <span>Status item: {service.item_status || "Belum ada"}</span>
+                          <span>Status antrean: {service.registration_status || "Belum ada"}</span>
+                          {service.service_mode === "BAZAR" && service.payment_method ? <span>Metode payment: {service.payment_method}</span> : null}
+                          {service.service_mode === "BAZAR" && Number(service.payment_amount || 0) > 0 ? <span>Nominal item: Rp {number(service.payment_amount)}</span> : null}
+                        </> : null}
+                        {service.source === "SYSTEM" && service.record_status ? <span>Status klinis: {service.record_status}</span> : null}
                       </div>
                       {service.notes ? <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{service.notes}</div> : null}
                       <div className="mt-3">
-                        {service.source === "SYSTEM" ? (
-                          <span className="text-xs font-semibold text-slate-400">Record sistem read-only agar transaksi dan inventory tetap aman.</span>
-                        ) : (
+                        {service.source === "HISTORY_IMPORT" ? (
                           <button type="button" onClick={() => openEditService(service)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">Edit Layanan</button>
+                        ) : (
+                          <span className="text-xs font-semibold text-slate-500">{service.source === "SYSTEM_BENEFIT" ? "Benefit registrasi bukan bukti vaksin telah diberikan. Data read-only, status mengikuti registrasi." : "Record klinis read-only; transaksi dan stok tidak diubah."}</span>
                         )}
                       </div>
                     </div>
