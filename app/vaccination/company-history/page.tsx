@@ -35,6 +35,8 @@ export default function VaccinationCompanyHistoryPage() {
   const [companyId, setCompanyId] = useState("");
   const [companyData, setCompanyData] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null);
+  const [familyDetailBack, setFamilyDetailBack] = useState<number[]>([]);
+
   const [familyManager, setFamilyManager] = useState<any>(null);
   const [familyQuery, setFamilyQuery] = useState("");
   const [familyCandidates, setFamilyCandidates] = useState<any[]>([]);
@@ -120,6 +122,22 @@ export default function VaccinationCompanyHistoryPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // V6343: navigate by the canonical vaccination_persons.id, not shared BINUSIAN ID.
+  async function openRelatedPerson(personId: any) {
+    const id = Number(personId || 0);
+    if (!Number.isSafeInteger(id) || id <= 0 || id === Number(detail?.person?.id || 0)) return;
+    const current = Number(detail?.person?.id || 0);
+    if (current) setFamilyDetailBack((stack) => [...stack, current].slice(-15));
+    await loadDetail(id);
+  }
+
+  async function goBackRelatedPerson() {
+    const previousId = familyDetailBack[familyDetailBack.length - 1];
+    if (!previousId) return;
+    setFamilyDetailBack((stack) => stack.slice(0, -1));
+    await loadDetail(previousId);
   }
 
   function openFamilyManager() {
@@ -745,9 +763,10 @@ export default function VaccinationCompanyHistoryPage() {
                 <div className="mt-1 text-sm font-semibold text-slate-500">{detail.company?.company_name} · {detail.person?.participant_type === "DEPENDENT" ? "Anak / Tanggungan" : "Karyawan"}</div>
               </div>
               <div className="flex flex-wrap gap-2">
+                {familyDetailBack.length ? <button type="button" onClick={() => void goBackRelatedPerson()} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700">← Kembali ke profil sebelumnya</button> : null}
                 <button type="button" onClick={openFamilyManager} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">Atur Hubungan Keluarga</button>
                 <button type="button" onClick={openAddService} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700">+ Tambah Layanan</button>
-                <button type="button" onClick={() => setDetail(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
+                <button type="button" onClick={() => {setDetail(null);setFamilyDetailBack([]);}} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
               </div>
             </div>
 
@@ -791,10 +810,10 @@ export default function VaccinationCompanyHistoryPage() {
                 </div>
                 <div className="rounded-2xl border p-4 text-sm">
                   <div className="text-xs font-black uppercase text-slate-500">Relasi Keluarga</div>
-                  {(detail.parents || []).length ? <div className="mt-3"><b>Orang Tua / Wali Tertaut:</b><div className="mt-2 space-y-2">{detail.parents.map((p: any) => <div key={p.relation_id} className="rounded-lg bg-slate-50 px-3 py-2"><b>{p.participant_name}</b> <span className="text-xs text-slate-500">({p.relationship_type === "GUARDIAN" ? "Parent tambahan" : "Parent utama"})</span><div className="text-xs text-slate-500">{p.employee_id || p.email || ""}</div></div>)}</div></div> : detail.parent ? <div className="mt-3"><b>Parent:</b> {detail.parent.participant_name}</div> : null}
-                  {detail.dependents?.length ? <div className="mt-3"><b>Anak / Tanggungan:</b><div className="mt-2 flex flex-wrap gap-2">{detail.dependents.map((child: any) => <span key={child.id} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">{child.participant_name}</span>)}</div></div> : null}
+                  {(detail.parents || []).length ? <div className="mt-3"><b>Orang Tua / Wali Tertaut:</b><div className="mt-2 space-y-2">{detail.parents.map((p: any) => <button type="button" key={p.relation_id} disabled={!Number(p.id || p.parent_person_id)} onClick={() => void openRelatedPerson(p.id || p.parent_person_id)} className="block w-full rounded-lg bg-slate-50 px-3 py-2 text-left hover:bg-violet-50 focus-visible:outline-violet-600 disabled:opacity-60"><b className="text-violet-800 underline underline-offset-2">{p.participant_name}</b> <span className="text-xs text-slate-500">({p.relationship_type === "GUARDIAN" ? "Parent tambahan" : "Parent utama"})</span><div className="text-xs text-slate-500">{p.employee_id || p.email || ""} · Klik untuk detail Parent</div></button>)}</div></div> : detail.parent ? <div className="mt-3"><b>Parent:</b> <button type="button" disabled={!Number(detail.parent.id)} onClick={() => void openRelatedPerson(detail.parent.id)} className="font-bold text-violet-800 underline disabled:opacity-50">{detail.parent.participant_name}</button></div> : null}
+                  {detail.dependents?.length ? <div className="mt-3"><b>Anak / Tanggungan:</b><div className="mt-2 flex flex-wrap gap-2">{detail.dependents.map((child: any) => <button key={child.id} type="button" disabled={!Number(child.id)} onClick={() => void openRelatedPerson(child.id)} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800 underline underline-offset-2 hover:bg-violet-200 disabled:opacity-60" title="Lihat detail anak">{child.participant_name}</button>)}</div></div> : null}
                   {!detail.parent && !detail.dependents?.length && !detail.spouses?.length ? <div className="mt-3 text-slate-400">Tidak ada relasi keluarga yang tercatat.</div> : null}
-                  {detail.spouses?.length ? <div className="mt-3"><b>Suami/Istri terkonfirmasi:</b> {detail.spouses.map((spouse: any) => <span key={spouse.id} className="ml-2 rounded-lg bg-pink-50 px-2 py-1 font-semibold text-pink-900">{spouse.participant_name}</span>)}</div> : null}
+                  {detail.spouses?.length ? <div className="mt-3"><b>Suami/Istri terkonfirmasi:</b> {detail.spouses.map((spouse: any) => <button key={spouse.id} type="button" disabled={!Number(spouse.id)} onClick={() => void openRelatedPerson(spouse.id)} className="ml-2 rounded-lg bg-pink-50 px-2 py-1 font-semibold text-pink-900 underline hover:bg-pink-100 disabled:opacity-60">{spouse.participant_name}</button>)}</div> : null}
                 </div>
               </div>
 

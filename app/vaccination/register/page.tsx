@@ -215,6 +215,7 @@ export default function VaccinationRegisterPage() {
     masterCompanyKey: "",
     familyRole: "PARENT" as "PARENT" | "DEPENDENT",
     parentHistoryPersonId: null as number | null,
+    parentGuardianId: null as number | null, // V6343: family-only parent, not an EMPLOYEE History record.
     parentName: "",
     parentEmployeeId: "",
     parentNik: "",
@@ -255,6 +256,50 @@ export default function VaccinationRegisterPage() {
   const [parentQuery, setParentQuery] = useState("");
   const [parentResults, setParentResults] = useState<any[]>([]);
   const [parentSearching, setParentSearching] = useState(false);
+  const [parentDraftOpen, setParentDraftOpen] = useState(false);
+  const [parentDraftName, setParentDraftName] = useState("");
+  const [parentDraftBinusian, setParentDraftBinusian] = useState("");
+  const [parentDraftSaving, setParentDraftSaving] = useState(false);
+  const [parentDraftError, setParentDraftError] = useState("");
+
+  async function saveNewFamilyParent() {
+    const name = parentDraftName.trim();
+    const binusianId = parentDraftBinusian.trim();
+    if (name.length < 3 || binusianId.length < 4) {
+      setParentDraftError("Isi nama lengkap Parent dan BINUSIAN ID yang benar."); return;
+    }
+    if (!String(form.masterCompanyKey || "").trim()) {
+      setParentDraftError("Pilih perusahaan terlebih dahulu."); return;
+    }
+    setParentDraftSaving(true); setParentDraftError("");
+    try {
+      const response = await fetch("/api/vaccination/family-guardian", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyKey: form.masterCompanyKey, parentName: name, binusianId,
+          // Kontak dan perusahaan dari data yang sudah diisi pada peserta anak.
+          // NIK anak dan riwayat klinis tidak pernah diwariskan ke Parent.
+          contactEmail: form.email, contactPhone: form.phone,
+          department: form.department, companyName: form.companyName,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok || !Number(payload.guardian?.id)) {
+        setParentDraftError(String(payload.message || "Gagal menyimpan profil Parent.") ); return;
+      }
+      setForm((prev) => ({ ...prev,
+        parentHistoryPersonId: null,
+        parentGuardianId: Number(payload.guardian.id),
+        employeeId: String(prev.employeeId || binusianId),
+        parentName: String(payload.guardian.parent_name || name),
+        parentEmployeeId: String(payload.guardian.binusian_id || binusianId),
+        parentNik: "", parentEmail: String(payload.guardian.contact_email || prev.email || ""),
+      }));
+      setParentDraftOpen(false);setParentResults([]);setParentQuery("");
+    } catch (problem: any) {
+      setParentDraftError(String(problem?.message || "Koneksi Parent gagal."));
+    } finally { setParentDraftSaving(false); }
+  }
 
   function openWalkinModal() {
     setWalkinModalStep(1);
@@ -339,6 +384,7 @@ export default function VaccinationRegisterPage() {
         const params = new URLSearchParams({
           company_key: String(form.masterCompanyKey),
           q: keyword,
+          include_registrations: "1",
         });
         const response = await fetch(
           `/api/vaccination/register-master-search?${params.toString()}`,
@@ -354,8 +400,9 @@ export default function VaccinationRegisterPage() {
         const rows = (Array.isArray(payload?.results) ? payload.results : [])
           .filter(
             (row: any) =>
-              String(row?.participantType || "EMPLOYEE").toUpperCase() !== "DEPENDENT" &&
-              Number(row?.historyPersonId || 0) > 0,
+              Boolean(String(row?.name || "").trim()) &&
+              (String(row?.participantType || "EMPLOYEE").toUpperCase() !== "DEPENDENT" ||
+                (!Number(row?.historyPersonId || 0) && ["DATABASE", "REGISTRATION"].includes(String(row?.sourceType || "")))),
           )
           .slice(0, 20);
         setParentResults(rows);
@@ -1990,6 +2037,7 @@ export default function VaccinationRegisterPage() {
                                 ...prev,
                                 familyRole: "PARENT",
                                 parentHistoryPersonId: null,
+                                parentGuardianId: null,
                                 parentName: "",
                                 parentEmployeeId: "",
                                 parentNik: "",
@@ -1997,6 +2045,7 @@ export default function VaccinationRegisterPage() {
                               }));
                               setParentQuery("");
                               setParentResults([]);
+                              setParentDraftOpen(false);
                             }}
                             className={`rounded-xl px-4 py-3 text-sm font-black ${
                               form.familyRole === "PARENT"
@@ -2026,7 +2075,7 @@ export default function VaccinationRegisterPage() {
 
                         {form.familyRole === "DEPENDENT" ? (
                           <div className="mt-4">
-                            {form.parentHistoryPersonId ? (
+                            {form.parentHistoryPersonId || form.parentGuardianId ? (
                               <div className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                   <div className="text-xs font-black uppercase text-emerald-700">
@@ -2047,6 +2096,7 @@ export default function VaccinationRegisterPage() {
                                     setForm((prev) => ({
                                       ...prev,
                                       parentHistoryPersonId: null,
+                                      parentGuardianId: null,
                                       parentName: "",
                                       parentEmployeeId: "",
                                       parentNik: "",
@@ -2084,15 +2134,24 @@ export default function VaccinationRegisterPage() {
                                         type="button"
                                         key={`parent-${row.historyPersonId}`}
                                         onClick={() => {
+                                          if (!Number(row.historyPersonId || 0)) {
+                                            // Operational DB candidate: require manual confirmation; do not auto-create identity.
+                                            setParentDraftName(String(row.name || "").trim());
+                                            setParentDraftBinusian(String(row.employeeId || form.employeeId || "").trim());
+                                            setParentDraftOpen(true);
+                                            setParentDraftError("");
+                                            return;
+                                          }
                                           setForm((prev) => ({
                                             ...prev,
-                                            parentHistoryPersonId:
-                                              Number(row.historyPersonId || 0) || null,
+                                            parentHistoryPersonId: Number(row.historyPersonId),
+                                            parentGuardianId: null,
                                             parentName: String(row.name || "").trim(),
                                             parentEmployeeId: String(row.employeeId || "").trim(),
                                             parentNik: String(row.nik || "").trim(),
                                             parentEmail: String(row.email || "").trim(),
                                           }));
+                                          setParentDraftOpen(false);
                                           setParentQuery("");
                                           setParentResults([]);
                                         }}
@@ -2109,18 +2168,44 @@ export default function VaccinationRegisterPage() {
                                           </div>
                                         </div>
                                         <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">
-                                          Parent
+                                          {Number(row.historyPersonId || 0) ? "Parent History" : "Dari Database · Konfirmasi"}
                                         </span>
                                       </button>
                                     ))}
                                   </div>
                                 ) : null}
 
-                                {!parentSearching &&
-                                parentQuery.trim().length >= 2 &&
-                                !parentResults.length ? (
+                                {!parentSearching && parentQuery.trim().length >= 2 && !parentResults.length ? (
                                   <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-                                    Data Parent belum ditemukan. Pilih Parent yang sudah terdaftar agar hubungan keluarga tercatat dengan benar.
+                                    Parent belum ditemukan di Master / Database. Jika benar-benar baru, buat profil Parent terlebih dahulu.
+                                  </div>
+                                ) : null}
+                                <div className="mt-3">
+                                  <button type="button" onClick={() => {
+                                    setParentDraftOpen((v) => !v);setParentDraftError("");
+                                    setParentDraftName("");setParentDraftBinusian(String(form.employeeId || ""));
+                                  }} className="rounded-xl border border-violet-300 bg-white px-4 py-2.5 text-xs font-black text-violet-800 hover:bg-violet-50">
+                                    + Tambah Data Parent
+                                  </button>
+                                </div>
+                                {parentDraftOpen ? (
+                                  <div className="mt-3 space-y-3 rounded-xl border border-violet-200 bg-white p-3">
+                                    <b className="text-sm text-violet-950">Data Parent Baru</b>
+                                    <div className="grid gap-2 md:grid-cols-2">
+                                      <label className="text-xs font-bold text-slate-700">Nama lengkap Parent *
+                                        <input value={parentDraftName} onChange={(e) => setParentDraftName(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" placeholder="Nama lengkap ibu / ayah / wali" />
+                                      </label>
+                                      <label className="text-xs font-bold text-slate-700">BINUSIAN ID *
+                                        <input value={parentDraftBinusian} onChange={(e) => setParentDraftBinusian(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" placeholder="Contoh BN000225870" />
+                                      </label>
+                                    </div>
+                                    <p className="text-[11px] leading-5 text-slate-600">Perusahaan dan kontak keluarga memakai data yang sudah diisi pada formulir peserta baru. Pastikan email/HP memang boleh digunakan bersama. NIK anak, tanggal lahir, dan riwayat vaksin tidak disalin ke Parent. Parent baru bukan otomatis karyawan.</p>
+                                    <div className="text-[11px] font-semibold text-slate-500">{form.companyName || "Perusahaan belum dipilih"} · {form.email || "Email belum diisi"} · {form.phone || "No. HP belum diisi"}</div>
+                                    {parentDraftError ? <p role="alert" className="rounded-lg bg-rose-50 p-2 text-xs font-bold text-rose-700">{parentDraftError}</p> : null}
+                                    <div className="flex flex-wrap gap-2">
+                                      <button type="button" disabled={parentDraftSaving} onClick={() => void saveNewFamilyParent()} className="rounded-lg bg-violet-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50">{parentDraftSaving ? "Menyimpan Parent..." : "Simpan & Pilih Parent"}</button>
+                                      <button type="button" disabled={parentDraftSaving} onClick={() => setParentDraftOpen(false)} className="rounded-lg border px-4 py-2 text-xs font-bold">Batal</button>
+                                    </div>
                                   </div>
                                 ) : null}
                               </>
@@ -2146,7 +2231,7 @@ export default function VaccinationRegisterPage() {
                         onClick={() => setWalkinModalStep(2)}
                         disabled={
                           !String(form.participantName || "").trim() ||
-                          (form.familyRole === "DEPENDENT" && !form.parentHistoryPersonId)
+                          (form.familyRole === "DEPENDENT" && !form.parentHistoryPersonId && !form.parentGuardianId)
                         }
                         className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
                       >

@@ -1720,9 +1720,29 @@ export async function POST(req: NextRequest) {
     toInt(body.historyPersonId || body.history_person_id, 0) || null;
   const requestedParentHistoryPersonId =
     toInt(body.parentHistoryPersonId || body.parent_history_person_id, 0) || null;
+  const requestedParentGuardianId = toInt(body.parentGuardianId, 0) || null;
+  if (requestedParentGuardianId && (familyRole !== "DEPENDENT" || requestedParentHistoryPersonId))
+    return fail("Parent Family terpisah hanya boleh dipilih untuk Child dan tidak boleh bersamaan dengan Parent History.", 400);
+  if (requestedParentGuardianId && requestedHistoryPersonId)
+    return fail("Anak sudah mempunyai profil Master History. Perbaiki relasi lewat Atur Hubungan Keluarga, jangan buat Parent baru.", 409);
+  if (familyRole === "DEPENDENT" && !requestedParentHistoryPersonId && !requestedParentGuardianId)
+    return fail("Untuk Child / Family, pilih Parent Existing atau Tambah Data Parent.", 400);
 
-  if (familyRole === "DEPENDENT" && !requestedParentHistoryPersonId) {
-    return fail("Untuk Child / Family, parent existing wajib dipilih pada Step 1.");
+  // V6343: validate guardian before creating any registration/items/queue rows.
+  // Schema missing, inactive, company mismatch -> abort read-only, no fallback to EMPLOYEE.
+  if (requestedParentGuardianId) {
+    const company = await resolveRegistrationHistoryCompany(supabase, session, body);
+    if (!company) return fail("Perusahaan Parent belum dapat diverifikasi.", 409);
+    const guardian = await supabase.from("vaccination_family_guardians_v6343")
+      .select("id,company_id,active,binusian_id")
+      .eq("id", requestedParentGuardianId).eq("company_id", Number(company.id))
+      .eq("active", true).maybeSingle();
+    if (guardian.error || !guardian.data)
+      return fail("Parent Family belum tersedia atau migrasi V6343 belum aktif. Jangan lanjutkan pendaftaran anak.", 423);
+    const childFamilyId = clean(body.employeeId || body.employee_id).toLowerCase();
+    const parentFamilyId = clean(guardian.data.binusian_id).toLowerCase();
+    if (childFamilyId && parentFamilyId && childFamilyId !== parentFamilyId)
+      return fail("BINUSIAN ID anak dan Parent berbeda. Periksa identitas keluarga sebelum registrasi.", 409);
   }
 
   // Internal queue keeps the existing combination rule.
@@ -1745,6 +1765,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (reusableRegistration && !moveFromRegistrationId) {
+    if (requestedParentGuardianId && Number(reusableRegistration.parent_guardian_id_v6343 || 0) !== requestedParentGuardianId)
+      return fail("Registrasi anak existing punya relasi Parent berbeda/belum diverifikasi. Jangan otomatis mengganti Parent.", 409);
     const existingItemsResult = await supabase
       .from("vaccination_registration_items")
       .select("*")
@@ -1819,6 +1841,7 @@ export async function POST(req: NextRequest) {
         familyRole === "DEPENDENT"
           ? (requestedParentHistoryPersonId || reusableRegistration.parent_history_person_id || null)
           : null,
+      ...(requestedParentGuardianId ? { parent_guardian_id_v6343: requestedParentGuardianId } : {}),
       participant_name: participantName || reusableRegistration.participant_name,
       employee_id:
         clean(body.employeeId || body.employee_id) || reusableRegistration.employee_id || null,
@@ -1884,6 +1907,7 @@ export async function POST(req: NextRequest) {
     family_role: familyRole,
     parent_history_person_id:
       familyRole === "DEPENDENT" ? requestedParentHistoryPersonId : null,
+    ...(requestedParentGuardianId ? { parent_guardian_id_v6343: requestedParentGuardianId } : {}),
     vaccine_id: vaccineId || null,
     participant_name: participantName,
     employee_id: clean(body.employeeId) || null,
@@ -1955,12 +1979,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const familyBinding = await syncRegistrationFamily(
-      supabase,
-      result.data,
-      session,
-      body,
-    );
+    // Guardian is NOT a History EMPLOYEE. Its FK is inserted atomically with the registration.
+    // Legacy History Parent/Child binding is only used when an actual History Parent is selected.
+    const familyBinding = requestedParentGuardianId
+      ? { familyRole: "DEPENDENT", historyPersonId: requestedHistoryPersonId, parentHistoryPersonId: null }
+      : await syncRegistrationFamily(supabase, result.data, session, body);
     Object.assign(result.data, {
       family_role: familyBinding.familyRole,
       history_person_id: familyBinding.historyPersonId,

@@ -457,11 +457,8 @@ export default function VaccinationManualWalkInController({
             ? "DEPENDENT"
             : "PARENT",
         parentHistoryPersonId:
-          Number(
-            form?.parentHistoryPersonId ||
-            form?.parent_history_person_id ||
-            0,
-          ) || null,
+          Number(form?.parentHistoryPersonId || form?.parent_history_person_id || 0) || null,
+        parentGuardianId: Number(form?.parentGuardianId || 0) || null,
         parentName: clean(form?.parentName || form?.parent_name),
         parentEmployeeId: clean(
           form?.parentEmployeeId || form?.parent_employee_id,
