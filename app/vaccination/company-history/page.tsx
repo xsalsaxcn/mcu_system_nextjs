@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import QRCodeImage from "@/components/QRCodeImage";
+import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
 function number(value: unknown) {
   return Number(value || 0).toLocaleString("id-ID");
@@ -34,6 +35,7 @@ export default function VaccinationCompanyHistoryPage() {
   const [companyId, setCompanyId] = useState("");
   const [companyData, setCompanyData] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null);
+  const [registrationHistory, setRegistrationHistory] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [type, setType] = useState("ALL");
   const [page, setPage] = useState(1);
@@ -476,10 +478,40 @@ export default function VaccinationCompanyHistoryPage() {
                       <td className="p-3 text-center"><button type="button" onClick={() => void loadDetail(Number(row.id))} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">Detail History</button></td>
                     </tr>
                   ))}
-                  {!companyData?.rows?.length ? <tr><td colSpan={9} className="p-8 text-center font-semibold text-slate-500">Tidak ada peserta untuk filter ini.</td></tr> : null}
+                  {!companyData?.rows?.length ? <tr><td colSpan={9} className="p-8 text-center font-semibold text-slate-500">Tidak ada profil Master History untuk filter ini. Periksa hasil Registrasi di bawah bila tersedia.</td></tr> : null}
                 </tbody>
               </table>
             </div>
+
+            {companyData?.operational_matches?.length ? (
+              <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                <h3 className="text-sm font-black text-amber-950">Peserta ditemukan di Registrasi, belum terhubung ke Master History</h3>
+                <p className="mt-1 text-xs font-semibold text-amber-900">
+                  Hasil baca-saja. Data layanan berasal dari registrasi dan record vaksinasi; peserta tidak dibuat ulang dan BINUSIAN ID keluarga tidak digabung otomatis.
+                </p>
+                <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
+                  <table className="w-full min-w-[750px] text-sm">
+                    <thead className="bg-slate-100 text-xs text-slate-700"><tr>
+                      <th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIP / BINUSIAN ID</th>
+                      <th className="p-3 text-center">Benefit</th><th className="p-3 text-center">Record</th>
+                      <th className="p-3 text-left">Terakhir</th><th className="p-3 text-center">Aksi</th>
+                    </tr></thead>
+                    <tbody className="divide-y">
+                      {(companyData.operational_matches || []).map((r: any) => (
+                        <tr key={`unlinked-${r.registration_id}`}>
+                          <td className="p-3 font-bold">{r.participant_name}</td>
+                          <td className="p-3">{r.employee_id || r.nik || "-"}</td>
+                          <td className="p-3 text-center">{number(r.benefit_count)}</td>
+                          <td className="p-3 text-center">{number(r.record_count)}</td>
+                          <td className="p-3">{date(r.last_date)}</td>
+                          <td className="p-3 text-center"><button type="button" onClick={() => setRegistrationHistory({ id: r.registration_id, participant_name: r.participant_name, employee_id: r.employee_id, nik: r.nik, email: r.email })} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold hover:bg-blue-50">Riwayat Registrasi</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm font-semibold text-slate-500">Menampilkan halaman {pagination.page} dari {pagination.pages} · total {number(pagination.total)} peserta</div>
@@ -620,6 +652,7 @@ export default function VaccinationCompanyHistoryPage() {
         </>
       ) : null}
 
+      {registrationHistory ? <VaccinationParticipantHistoryModal registration={registrationHistory} onClose={() => setRegistrationHistory(null)} /> : null}
       {detail ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setDetail(null); }}>
           <section className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border bg-white shadow-2xl">

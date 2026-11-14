@@ -1593,7 +1593,7 @@ export default function VaccinationParticipantMasterSearch({
                           Peserta ini Child
                         </button>
                       </div>
-                      {familyChildren.length ? <div className="rounded-lg bg-amber-50 p-2 text-xs font-semibold text-amber-800">Peserta sudah memiliki Child. Hanya bisa menambahkan anggota Child, bukan mengubahnya menjadi Child dari Parent lain.</div> : null}
+                      {familyChildren.length ? <div className="rounded-lg bg-amber-50 p-2 text-xs font-semibold text-amber-800">Koreksi Family diperlukan: profil ini masih menjadi Parent bagi anggota lain. Hubungan anak yang sudah tercatat harus ditinjau satu per satu terlebih dahulu; jangan hapus profil atau mengubahnya otomatis karena riwayat klinis dan identitas keluarga harus tetap aman.</div> : null}
                       <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
                         <div className="text-xs font-black text-sky-900">Kandidat dari perusahaan & Employee ID yang sama</div>
                         <div className="mt-1 text-[11px] font-semibold text-sky-800">Lintas import Dewasa/Anak dan Session. Belum terhubung sampai kamu pilih lalu simpan.</div>

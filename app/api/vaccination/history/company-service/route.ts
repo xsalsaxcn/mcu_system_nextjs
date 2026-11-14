@@ -277,6 +277,110 @@ function systemBenefitsForPerson(person: any, parent: any, systemRows: any[]) {
     });
 }
 
+// V633.9 - read-only operational search. A Registration is NOT automatically
+// a History Master person. Shared BINUSIAN IDs never authorize merging names.
+async function searchUnlinkedOperationalRegistrations(
+  supabase: any, company: any, search: string,
+) {
+  if (search.length < 2) return [];
+  const token = cleanSearch(search).slice(0, 100);
+  if (token.length < 2) return [];
+  const term = `%${token}%`;
+  const result = await supabase.from("vaccination_registrations")
+    .select("id,session_id,participant_name,employee_id,nik,email,company_name,history_person_id,registered_at")
+    .or(`participant_name.ilike.${term},employee_id.ilike.${term},nik.ilike.${term},email.ilike.${term}`)
+    .order("id", { ascending: false }).limit(101);
+  if (result.error) throw new Error(result.error.message);
+  if ((result.data || []).length > 100) {
+    throw new Error("Terlalu banyak registrasi cocok. Persempit pencarian dengan nama lengkap atau identitas khusus.");
+  }
+  const matches = result.data || [];
+  if (!matches.length) return [];
+  const sessionIds = Array.from(new Set<number>(matches.map((r: any) => Number(r.session_id)).filter(Boolean)));
+  const sessionResult = await supabase.from("vaccination_sessions")
+    .select("id,session_name,company_name,source_name,session_date")
+    .in("id", sessionIds);
+  if (sessionResult.error) throw new Error(sessionResult.error.message);
+  const sessionMap = new Map<number, any>((sessionResult.data || []).map((s: any) => [Number(s.id), s]));
+  const scoped = matches.filter((r: any) => {
+    const session = sessionMap.get(Number(r.session_id));
+    return [r.company_name, session?.company_name, session?.source_name, session?.session_name]
+      .some((v) => companyHintMatches(String(company.company_key), v));
+  });
+  if (!scoped.length) return [];
+  // If the registration already points to an actual History Master person,
+  // it belongs in the canonical table, not in this fallback result.
+  const linkedIds = Array.from(new Set<number>(scoped.map((r: any) => Number(r.history_person_id)).filter(Boolean)));
+  const confirmedIds = new Set<number>();
+  if (linkedIds.length) {
+    const linkResult = await supabase.from("vaccination_persons").select("id")
+      .eq("company_id", Number(company.id)).eq("active", true).in("id", linkedIds);
+    if (linkResult.error) throw new Error(linkResult.error.message);
+    (linkResult.data || []).forEach((p: any) => confirmedIds.add(Number(p.id)));
+  }
+  const unlinked = scoped.filter((r: any) => !confirmedIds.has(Number(r.history_person_id || 0)));
+  if (!unlinked.length) return [];
+  const ids = unlinked.map((r: any) => Number(r.id));
+  const [itemsResult, recordsResult] = await Promise.all([
+    supabase.from("vaccination_registration_items")
+      .select("id,registration_id,service_mode,status,active,vaccine:vaccination_vaccines(id,name,brand)")
+      .in("registration_id", ids).eq("active", true),
+    supabase.from("vaccination_records")
+      .select("id,registration_id,status,vaccine_name,administered_at")
+      .in("registration_id", ids),
+  ]);
+  if (itemsResult.error) throw new Error(itemsResult.error.message);
+  if (recordsResult.error) throw new Error(recordsResult.error.message);
+  const itemsById = new Map<number, any[]>();
+  const recordsById = new Map<number, any[]>();
+  for (const item of itemsResult.data || []) {
+    const id = Number(item.registration_id);
+    if (!itemsById.has(id)) itemsById.set(id, []);
+    itemsById.get(id)!.push(item);
+  }
+  for (const record of recordsResult.data || []) {
+    const id = Number(record.registration_id);
+    if (!recordsById.has(id)) recordsById.set(id, []);
+    recordsById.get(id)!.push(record);
+  }
+  const groups = new Map<string, any>();
+  for (const registration of unlinked) {
+    const participantName = name(registration.participant_name);
+    const employeeId = identity(registration.employee_id);
+    const nik = identity(registration.nik);
+    const address = email(registration.email);
+    if (!participantName || !(employeeId || nik || address)) continue;
+    // No dedup on BINUSIAN ID alone: exact name AND at least one stable key.
+    const key = `${participantName}|${employeeId}|${nik}|${address}`;
+    const regId = Number(registration.id);
+    const items = itemsById.get(regId) || [];
+    const records = recordsById.get(regId) || [];
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        registration_id: regId, participant_name: registration.participant_name,
+        employee_id: registration.employee_id, nik: registration.nik,
+        email: registration.email, registration_count: 0,
+        benefit_count: 0, record_count: 0, benefit_names: [] as string[],
+        last_date: "", source_label: "Registrasi vaksinasi (belum terhubung ke profil History)",
+      };
+      groups.set(key, group);
+    }
+    group.registration_count += 1;
+    group.benefit_count += items.length;
+    group.record_count += records.length;
+    for (const item of items) {
+      const v = Array.isArray(item.vaccine) ? item.vaccine[0] : item.vaccine;
+      const value = historyText(v?.name);
+      if (value && !group.benefit_names.includes(value)) group.benefit_names.push(value);
+    }
+    const itemDate = records.map((r: any) => dateOnly(r.administered_at)).sort().pop() || "";
+    const date = itemDate || dateOnly(registration.registered_at) || dateOnly(sessionMap.get(Number(registration.session_id))?.session_date);
+    if (date > group.last_date) group.last_date = date;
+  }
+  return Array.from(groups.values()).slice(0, 100);
+}
+
 async function parentMapForDependents(supabase: any, dependentIds: number[]) {
   const map = new Map<number, any>();
   if (!dependentIds.length) return map;
@@ -496,9 +600,14 @@ export async function GET(req: NextRequest) {
     if (dependentCount.error) throw new Error(dependentCount.error.message);
     if (serviceCount.error) throw new Error(serviceCount.error.message);
 
+    const operationalMatches = search && page === 1
+      ? await searchUnlinkedOperationalRegistrations(supabase, company, search)
+      : [];
+
     return ok({
       company,
       rows,
+      operational_matches: operationalMatches,
       pagination: {
         page,
         page_size: pageSize,
