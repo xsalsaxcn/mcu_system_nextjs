@@ -77,13 +77,16 @@ async function candidateQueries(supabase: any, registration: any, companyId?: nu
   if (dependentIds.length) {
     const relResult = await supabase
       .from("vaccination_person_relationships")
-      .select("dependent_person_id,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(*)")
+      .select("dependent_person_id,relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(*)")
       .in("dependent_person_id", dependentIds)
       .eq("active", true);
     if (relResult.error) throw new Error(relResult.error.message);
     for (const rel of relResult.data || []) {
       const parent = Array.isArray(rel.parent) ? rel.parent[0] : rel.parent;
-      if (parent) parentByDependent.set(Number(rel.dependent_person_id), parent);
+      if (parent) {
+        const id = Number(rel.dependent_person_id);
+        if (!parentByDependent.has(id) || rel.relationship_type !== "GUARDIAN") parentByDependent.set(id, parent);
+      }
     }
   }
 
@@ -231,6 +234,7 @@ async function familyForPerson(supabase: any, person: any) {
       .select("relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_name,employee_id,nik,email,phone)")
       .eq("dependent_person_id", person.id)
       .eq("active", true)
+      .order("relationship_type", { ascending: true })
       .limit(1)
       .maybeSingle();
     if (rel.error) throw new Error(rel.error.message);
@@ -471,6 +475,7 @@ export async function GET(req: NextRequest) {
             )
             .eq("dependent_person_id", directResult.data.id)
             .eq("active", true)
+            .order("relationship_type", { ascending: true })
             .limit(1)
             .maybeSingle();
           if (relResult.error) throw new Error(relResult.error.message);

@@ -35,6 +35,14 @@ export default function VaccinationCompanyHistoryPage() {
   const [companyId, setCompanyId] = useState("");
   const [companyData, setCompanyData] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null);
+  const [familyManager, setFamilyManager] = useState<any>(null);
+  const [familyQuery, setFamilyQuery] = useState("");
+  const [familyCandidates, setFamilyCandidates] = useState<any[]>([]);
+  const [familySelected, setFamilySelected] = useState<any>(null);
+  const [familyConfirmed, setFamilyConfirmed] = useState(false);
+  const [familyExtraParent, setFamilyExtraParent] = useState(false);
+  const [familyBusy, setFamilyBusy] = useState(false);
+  const [familyMessage, setFamilyMessage] = useState("");
   const [registrationHistory, setRegistrationHistory] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [type, setType] = useState("ALL");
@@ -108,6 +116,51 @@ export default function VaccinationCompanyHistoryPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function openFamilyManager() {
+    if (!detail?.person?.id || !detail?.company?.id) return;
+    setFamilyManager({ companyId: Number(detail.company.id),
+      currentId: Number(detail.person.id), currentName: String(detail.person.participant_name),
+      currentType: detail.person.participant_type });
+    setFamilyQuery(""); setFamilyCandidates([]); setFamilySelected(null);
+    setFamilyConfirmed(false); setFamilyExtraParent(false); setFamilyMessage("");
+  }
+
+  async function searchFamilyCandidates() {
+    if (!familyManager || familyQuery.trim().length < 2) return;
+    setFamilyBusy(true); setFamilyMessage(""); setFamilySelected(null);
+    try {
+      const params = new URLSearchParams({ company_id: String(familyManager.companyId), q: familyQuery.trim() });
+      const data = await fetchJson(`/api/vaccination/history/family-lookup?${params.toString()}`);
+      setFamilyCandidates((data.candidates || []).filter((c: any) => Number(c.id) !== familyManager.currentId &&
+        c.participant_type === (familyManager.currentType === "EMPLOYEE" ? "DEPENDENT" : "EMPLOYEE")));
+    } catch (e: any) { setFamilyCandidates([]); setFamilyMessage(String(e?.message || e)); }
+    finally { setFamilyBusy(false); }
+  }
+
+  async function saveFamilyLink() {
+    if (!familyManager || !familySelected || !familyConfirmed || !detail?.company?.company_key) return;
+    setFamilyBusy(true); setFamilyMessage("");
+    const subject = { historyPersonId: familyManager.currentId, name: familyManager.currentName };
+    const chosen = familySelected.source === "REGISTRATION"
+      ? { registrationId: familySelected.registration_id, name: familySelected.participant_name }
+      : { historyPersonId: familySelected.id, name: familySelected.participant_name };
+    const parent = familyManager.currentType === "EMPLOYEE" ? subject : chosen;
+    const dependent = familyManager.currentType === "EMPLOYEE" ? chosen : subject;
+    try {
+      const data = await fetchJson("/api/vaccination/family-bind", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyKey: detail.company.company_key, parent, dependent,
+          allowAdditionalParent: familyExtraParent }),
+      });
+      setFamilyMessage(data?.message || "Hubungan berhasil disimpan.");
+      setFamilyConfirmed(false);
+      await loadDetail(familyManager.currentId);
+      await loadCompany(page, search, type);
+      setFamilyCandidates([]); setFamilySelected(null); setFamilyQuery("");
+    } catch (e: any) { setFamilyMessage(String(e?.message || e)); }
+    finally { setFamilyBusy(false); }
   }
 
   function openCompanyPortalQr(company: any) {
@@ -472,6 +525,9 @@ export default function VaccinationCompanyHistoryPage() {
                           {!row.benefit_names?.length ? <span className="text-xs font-semibold text-slate-400">Belum ada layanan</span> : null}
                         </div>
                         {row.system_count ? <div className="mt-2 text-xs font-bold text-emerald-700">Termasuk {row.system_count} record sistem</div> : null}
+                        {row.validation?.validation_done_registrations ? <div className="mt-1 text-xs font-bold text-blue-700">Validasi selesai: {number(row.validation.validation_done_registrations)} registrasi</div> : null}
+                        {row.validation?.done_without_current_record ? <div className="mt-1 text-xs font-bold text-amber-700">Perlu cek: {number(row.validation.done_without_current_record)} registrasi DONE belum memiliki record ADMINISTERED yang ditemukan</div> : null}
+                        {row.validation?.completed_with_missing_linked_record ? <div className="mt-1 text-xs font-bold text-amber-700">Perlu pemeriksaan: {number(row.validation.completed_with_missing_linked_record)} item tidak menemukan record klinis terkait</div> : null}
                       </td>
                       <td className="p-3 text-right text-lg font-black">{number(row.service_count)}</td>
                       <td className="p-3"><div className="font-bold">{date(row.last_service_date)}</div><div className="mt-1 max-w-[220px] text-xs text-slate-500">{row.last_service_name || "-"}</div></td>
@@ -663,6 +719,7 @@ export default function VaccinationCompanyHistoryPage() {
                 <div className="mt-1 text-sm font-semibold text-slate-500">{detail.company?.company_name} · {detail.person?.participant_type === "DEPENDENT" ? "Anak / Tanggungan" : "Karyawan"}</div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={openFamilyManager} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">Atur Hubungan Keluarga</button>
                 <button type="button" onClick={openAddService} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700">+ Tambah Layanan</button>
                 <button type="button" onClick={() => setDetail(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
               </div>
@@ -681,6 +738,19 @@ export default function VaccinationCompanyHistoryPage() {
                 ))}
               </div>
 
+              <section className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+                <div className="text-xs font-black uppercase text-blue-800">Sinkronisasi Tim Validasi &amp; Riwayat</div>
+                <div className="mt-2 flex flex-wrap gap-4 text-sm font-bold text-slate-800">
+                  <span>Registrasi terkait: {number(detail.validation?.registration_count)}</span>
+                  <span>Validasi DONE: {number(detail.validation?.validation_done_registrations)}</span>
+                  <span>Item berstatus selesai: {number(detail.validation?.completed_items)}</span>
+                  <span>Record klinis ADMINISTERED: {number(detail.validation?.administered_records)}</span>
+                </div>
+                {detail.validation?.done_without_current_record ? <p className="mt-2 text-sm font-bold text-amber-800">Ada {number(detail.validation.done_without_current_record)} registrasi berstatus selesai tetapi belum ditemukan record klinis ADMINISTERED dalam data yang terbaca. Periksa Tim Validasi sebelum menyimpulkan tindakan sudah diberikan.</p> : null}
+                {detail.validation?.completed_with_missing_linked_record ? <p className="mt-2 text-sm font-bold text-amber-800">Ada {number(detail.validation.completed_with_missing_linked_record)} item selesai dengan tautan record klinis yang tidak ditemukan. Perlu audit, tidak mengubah status otomatis.</p> : null}
+                <p className="mt-2 text-xs font-semibold text-slate-600">Master History adalah profil peserta, bukan status vaksin. Validasi DONE tidak otomatis membuktikan pemberian vaksin; record klinis tetap menjadi bukti tindakan.</p>
+              </section>
+
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-2xl border p-4 text-sm">
                   <div className="text-xs font-black uppercase text-slate-500">Identitas Peserta</div>
@@ -694,7 +764,7 @@ export default function VaccinationCompanyHistoryPage() {
                 </div>
                 <div className="rounded-2xl border p-4 text-sm">
                   <div className="text-xs font-black uppercase text-slate-500">Relasi Keluarga</div>
-                  {detail.parent ? <div className="mt-3"><b>Parent:</b> {detail.parent.participant_name}<div className="mt-1 text-xs text-slate-500">{detail.parent.employee_id || detail.parent.email || ""}</div>{detail.parent.phone ? <div className="mt-1 text-xs font-semibold text-emerald-700">No. HP Parent: {detail.parent.phone}</div> : null}</div> : null}
+                  {(detail.parents || []).length ? <div className="mt-3"><b>Orang Tua / Wali Tertaut:</b><div className="mt-2 space-y-2">{detail.parents.map((p: any) => <div key={p.relation_id} className="rounded-lg bg-slate-50 px-3 py-2"><b>{p.participant_name}</b> <span className="text-xs text-slate-500">({p.relationship_type === "GUARDIAN" ? "Parent tambahan" : "Parent utama"})</span><div className="text-xs text-slate-500">{p.employee_id || p.email || ""}</div></div>)}</div></div> : detail.parent ? <div className="mt-3"><b>Parent:</b> {detail.parent.participant_name}</div> : null}
                   {detail.dependents?.length ? <div className="mt-3"><b>Anak / Tanggungan:</b><div className="mt-2 flex flex-wrap gap-2">{detail.dependents.map((child: any) => <span key={child.id} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">{child.participant_name}</span>)}</div></div> : null}
                   {!detail.parent && !detail.dependents?.length ? <div className="mt-3 text-slate-400">Tidak ada relasi parent-anak yang tercatat.</div> : null}
                 </div>
@@ -718,6 +788,9 @@ export default function VaccinationCompanyHistoryPage() {
                         {service.lot_number ? <span>Lot {service.lot_number}</span> : null}
                         {service.administered_by ? <span>Petugas: {service.administered_by}</span> : null}
                         {service.source_filename ? <span>Sumber: {service.source_filename}</span> : null}
+                        {service.source === "SYSTEM" && service.record_status ? <span>Status klinis: {service.record_status}</span> : null}
+                        {service.source === "SYSTEM_BENEFIT" && service.validation_status ? <span>Validasi: {service.validation_status}</span> : null}
+                        {service.source === "SYSTEM_BENEFIT" && service.item_status ? <span>Item: {service.item_status}</span> : null}
                         {service.source === "SYSTEM_BENEFIT" ? <>
                           <span>Layanan: {service.service_mode === "BAZAR" ? "Bazar" : "Healthday"}</span>
                           <span>Status item: {service.item_status || "Belum ada"}</span>
@@ -740,6 +813,50 @@ export default function VaccinationCompanyHistoryPage() {
                   {!detail.services?.length ? <div className="rounded-2xl border border-dashed p-8 text-center font-semibold text-slate-500">Belum ada benefit / layanan yang tercatat.</div> : null}
                 </div>
               </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {familyManager ? (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/60 p-4">
+          <section className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div><div className="text-xs font-black uppercase text-violet-700">History Company Service · Family</div>
+              <h3 className="mt-1 text-xl font-black">Atur Hubungan Keluarga</h3>
+              <p className="mt-1 text-sm text-slate-600">Profil dipilih satu per satu. BINUSIAN ID sama bukan bukti satu orang.</p></div>
+              <button type="button" onClick={() => setFamilyManager(null)} className="rounded-xl border px-3 py-2 text-sm font-bold">Tutup</button>
+            </div>
+            <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
+              <b>{familyManager.currentName}</b> · {familyManager.currentType === "EMPLOYEE" ? "Parent" : "Child"}<br />
+              <span className="text-slate-600">{familyManager.currentType === "EMPLOYEE" ? "Pilih profil anak yang akan ditautkan." : "Pilih profil Parent yang akan ditautkan."}</span>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <input value={familyQuery} onChange={e => setFamilyQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void searchFamilyCandidates(); }} placeholder="Cari nama lengkap atau NIP / NIK" className="min-w-0 flex-1 rounded-xl border px-3 py-2" />
+              <button type="button" disabled={familyBusy || familyQuery.trim().length < 2} onClick={() => void searchFamilyCandidates()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Cari</button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">Kandidat berasal dari Master History atau Registrasi di perusahaan yang sama. Pilih berdasarkan nama dan bukti identitas; BINUSIAN ID keluarga saja tidak cukup. Untuk kandidat Registrasi, profil History baru hanya dapat dibuat setelah konfirmasi dan validasi server.</p>
+            <div className="mt-3 max-h-52 space-y-2 overflow-y-auto">
+              {familyCandidates.map((c: any) => (
+                <button key={`${c.source || "HISTORY"}-${c.id}`} type="button" onClick={() => { setFamilySelected(c); setFamilyConfirmed(false); setFamilyExtraParent(false); }} className={`block w-full rounded-xl border p-3 text-left text-sm ${familySelected?.id === c.id && familySelected?.source === c.source ? "border-violet-600 bg-violet-50" : "bg-white"}`}>
+                  <b>{c.participant_name}</b> · {c.source === "REGISTRATION" ? `Registrasi #${c.registration_id} (belum tentu ada di Master History)` : `History #${c.id}`}<div className="text-xs text-slate-500">{c.employee_id || c.nik || c.email || "Identitas sekunder tidak tersedia"}</div>
+                  {c.parents?.length ? <div className="mt-1 text-xs text-amber-700">Parent tercatat: {c.parents.map((p: any) => p.name).join(", ")}</div> : null}
+                </button>
+              ))}
+            </div>
+            {familySelected ? <div className="mt-4 rounded-xl border p-4 text-sm">
+              <b>Konfirmasi relasi:</b> {familyManager.currentType === "EMPLOYEE" ? familyManager.currentName : familySelected.participant_name} → {familyManager.currentType === "EMPLOYEE" ? familySelected.participant_name : familyManager.currentName}
+              {((familyManager.currentType === "EMPLOYEE" ? familySelected.parents?.length : detail?.parents?.length) || 0) > 0 ?
+                <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={familyExtraParent} onChange={e => setFamilyExtraParent(e.target.checked)} className="mt-1" />
+                  <span>Tambahkan sebagai Parent kedua tanpa mengganti Parent utama. Maksimal 2 Parent aktif. Periksa dulu bahwa keduanya benar orang tua/wali dari anak ini.</span></label> : null}
+              {familySelected.source === "REGISTRATION" ? <p className="mt-2 text-xs font-bold text-amber-800">Kandidat dari Registrasi. Saat disimpan sistem dapat membuat profil Master History baru jika belum ada kecocokan yang terverifikasi; tidak mengubah record klinis atau stok. Penambahan Parent kedua dari Registrasi-only tidak didukung: buat/verifikasi profil Master lebih dulu.</p> : null}
+              <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={familyConfirmed} onChange={e => setFamilyConfirmed(e.target.checked)} className="mt-1" />
+                <span>Saya sudah memeriksa nama dan identitas kedua peserta serta mengonfirmasi hubungan keluarga ini.</span></label>
+            </div> : null}
+            {familyMessage ? <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">{familyMessage}</div> : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setFamilyManager(null)} className="rounded-xl border px-4 py-2 text-sm font-bold">Batal</button>
+              <button type="button" onClick={() => void saveFamilyLink()} disabled={!familySelected || !familyConfirmed || familyBusy || (familyExtraParent && familySelected.source === "REGISTRATION")} className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{familyBusy ? "Memeriksa..." : "Simpan Hubungan"}</button>
             </div>
           </section>
         </div>

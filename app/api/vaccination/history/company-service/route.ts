@@ -214,7 +214,7 @@ async function loadSystemRowsForCompany(supabase: any, companyKey: string, compa
     }
     const items = await readAllPages(
       () => supabase.from("vaccination_registration_items")
-        .select("id,registration_id,service_mode,status,active,payment_method,sales_price_snapshot,lot_id,lot:vaccination_vaccine_lots(id,lot_number),vaccine:vaccination_vaccines(id,name,brand)")
+        .select("id,registration_id,service_mode,status,active,administered_record_id,payment_method,sales_price_snapshot,lot_id,lot:vaccination_vaccine_lots(id,lot_number),vaccine:vaccination_vaccines(id,name,brand)")
         .in("registration_id", ids).eq("active", true).order("id", { ascending: true }),
       5600,
     );
@@ -381,6 +381,61 @@ async function searchUnlinkedOperationalRegistrations(
   return Array.from(groups.values()).slice(0, 100);
 }
 
+
+// V6340.1: read-only projection of the Validation workflow. "DONE" in the
+// queue is not proof of a clinical administration; only the clinical record
+// with an administered status is counted as a verified administration.
+function validationSummaryForPerson(person: any, parent: any, systemRows: any[]) {
+  const matched = systemRows.filter((entry: any) =>
+    (entry.item || entry.record) && personScore(person, parent, entry.registration) >= 100);
+  const perRegistration = new Map<number, { registration: any; items: any[]; records: any[] }>();
+  for (const entry of matched) {
+    const id = Number(entry.registration?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    if (!perRegistration.has(id)) perRegistration.set(id, { registration: entry.registration, items: [], records: [] });
+    const group = perRegistration.get(id)!;
+    if (entry.item) group.items.push(entry.item);
+    if (entry.record) group.records.push(entry.record);
+  }
+  const terminal = new Set(["DONE", "FINISHED", "ADMINISTERED", "SELESAI"]);
+  const administered = new Set(["ADMINISTERED"]);
+  let validationDone = 0;
+  let administeredRecords = 0;
+  let completedItems = 0;
+  let completedWithoutRecord = 0;
+  let doneWithoutCurrentRecord = 0;
+  for (const group of perRegistration.values()) {
+    const validated = [group.registration?.validation_status, group.registration?.queue_status,
+      group.registration?.bazar_queue_status].some((v: any) => terminal.has(historyText(v).toUpperCase()));
+    const completed = group.items.filter((item: any) => terminal.has(historyText(item.status).toUpperCase()));
+    const real = group.records.filter((record: any) => administered.has(historyText(record.status).toUpperCase()));
+    const realIds = new Set(real.map((record: any) => Number(record.id)).filter(Boolean));
+    const recordsWithLinkedItems = completed.filter((item: any) =>
+      Number(item.administered_record_id) > 0 && realIds.has(Number(item.administered_record_id)));
+    if (validated || completed.length) {
+      validationDone += 1;
+      if (!real.length) doneWithoutCurrentRecord += 1;
+    }
+    completedItems += completed.length;
+    administeredRecords += real.length;
+    // Only count an explicit item-to-record discrepancy when the item has a
+    // known administered_record_id. If no link was recorded, report an
+    // unresolved association rather than asserting the record is missing.
+    completedWithoutRecord += completed.filter((item: any) =>
+      Number(item.administered_record_id) > 0 &&
+      !realIds.has(Number(item.administered_record_id))).length;
+    void recordsWithLinkedItems;
+  }
+  return {
+    registration_count: perRegistration.size,
+    validation_done_registrations: validationDone,
+    completed_items: completedItems,
+    administered_records: administeredRecords,
+    completed_with_missing_linked_record: completedWithoutRecord,
+    done_without_current_record: doneWithoutCurrentRecord,
+  };
+}
+
 async function parentMapForDependents(supabase: any, dependentIds: number[]) {
   const map = new Map<number, any>();
   if (!dependentIds.length) return map;
@@ -393,10 +448,28 @@ async function parentMapForDependents(supabase: any, dependentIds: number[]) {
     if (result.error) throw new Error(result.error.message);
     for (const relation of result.data || []) {
       const parent = Array.isArray(relation.parent) ? relation.parent[0] : relation.parent;
-      if (parent) map.set(Number(relation.dependent_person_id), parent);
+      if (parent) {
+        const key = Number(relation.dependent_person_id);
+        const prior = map.get(key);
+        // Preserve the original CHILD parent; GUARDIAN is an additional parent,
+        // not an automatic replacement of the registration's primary Parent.
+        if (!prior || relation.relationship_type !== "GUARDIAN") map.set(key, parent);
+      }
     }
   }
   return map;
+}
+
+async function allParentsForPerson(supabase: any, companyId: number, childId: number) {
+  const result = await supabase.from("vaccination_person_relationships")
+    .select("id,relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_name,employee_id,email,phone)")
+    .eq("company_id", companyId).eq("dependent_person_id", childId).eq("active", true).order("id", { ascending: true });
+  if (result.error) throw new Error(result.error.message);
+  return (result.data || []).map((r: any) => ({
+    relation_id: r.id, relationship_type: r.relationship_type,
+    ...(Array.isArray(r.parent) ? r.parent[0] : r.parent),
+  })).filter((p: any) => p?.id).sort((a: any, b: any) =>
+    (a.relationship_type === "GUARDIAN" ? 1 : 0) - (b.relationship_type === "GUARDIAN" ? 1 : 0));
 }
 
 async function dependentsForParent(supabase: any, parent: any) {
@@ -489,6 +562,8 @@ export async function GET(req: NextRequest) {
 
       const parentMap = await parentMapForDependents(supabase, person.participant_type === "DEPENDENT" ? [Number(person.id)] : []);
       const parent = parentMap.get(Number(person.id)) || null;
+      const parents = person.participant_type === "DEPENDENT"
+        ? await allParentsForPerson(supabase, companyId, personId) : [];
       const dependents = person.participant_type === "EMPLOYEE" ? await dependentsForParent(supabase, person) : [];
 
       const historyResult = await supabase
@@ -508,17 +583,20 @@ export async function GET(req: NextRequest) {
       const systemRows = await loadSystemRowsForCompany(supabase, String(company.company_key), companyId);
       const current = systemServicesForPerson(person, parent, systemRows);
       const benefits = systemBenefitsForPerson(person, parent, systemRows);
+      const validation = validationSummaryForPerson(person, parent, systemRows);
       const services = mergeServices([...historical, ...benefits, ...current]);
 
       return ok({
         company,
         person,
         parent,
+        parents,
         dependents,
         historical,
         current,
         benefits,
         services,
+        validation,
         summary: {
           total: services.length,
           history: historical.length,
@@ -576,6 +654,7 @@ export async function GET(req: NextRequest) {
       const historical = historyByPerson.get(Number(person.id)) || [];
       const current = systemServicesForPerson(person, parent, systemRows);
       const registeredBenefits = systemBenefitsForPerson(person, parent, systemRows);
+      const validation = validationSummaryForPerson(person, parent, systemRows);
       const services = mergeServices([...historical, ...registeredBenefits, ...current]);
       const benefits = Array.from(new Set(services.map(benefitLabel)));
       return {
@@ -585,6 +664,7 @@ export async function GET(req: NextRequest) {
         history_count: historical.length,
         system_count: current.length,
         system_benefit_count: registeredBenefits.length,
+        validation,
         benefit_names: benefits,
         last_service_date: services[0]?.service_date || "",
         last_service_name: services[0] ? benefitLabel(services[0]) : "",

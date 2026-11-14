@@ -202,6 +202,15 @@ export async function POST(req: NextRequest) {
 
     const dependent = await resolveSelection(supabase, company, body?.dependent || {}, "DEPENDENT");
     const parent = await resolveSelection(supabase, company, body?.parent || {}, "PARENT");
+    const additionalParent = body?.allowAdditionalParent === true;
+    // For a second parent the operation must be a single relationship INSERT.
+    // Do NOT create or convert people in this path, or alter the original Parent.
+    if (additionalParent && (!dependent.person || !parent.person ||
+        dependent.person.participant_type !== "DEPENDENT" ||
+        parent.person.participant_type !== "EMPLOYEE" ||
+        !positiveId(body?.dependent?.historyPersonId) || !positiveId(body?.parent?.historyPersonId))) {
+      throw new Error("Parent tambahan hanya untuk dua profil History existing (Parent dan Child). Tidak membuat profil baru atau mengubah role.");
+    }
     if (dependent.person?.id && dependent.person.id === parent.person?.id) {
       throw new Error("Peserta tidak boleh menjadi Parent dirinya sendiri.");
     }
@@ -278,8 +287,14 @@ export async function POST(req: NextRequest) {
       .eq("dependent_person_id", childId)
       .eq("active", true));
     const conflicting = (activeRelations || []).find((row: any) => Number(row.parent_person_id) !== parentId);
-    if (conflicting) throw new Error("Peserta sudah terikat ke Parent lain. Binding dibatalkan tanpa memindahkan keluarga.");
     const sameExisting = (activeRelations || []).find((row: any) => Number(row.parent_person_id) === parentId);
+    if (!additionalParent && conflicting) throw new Error("Peserta sudah terikat ke Parent lain. Binding dibatalkan tanpa memindahkan keluarga.");
+    if (additionalParent && !sameExisting && ((activeRelations || []).length !== 1 || !conflicting)) {
+      throw new Error("Penambahan Parent kedua hanya untuk anak dengan tepat satu Parent existing. Hubungan ambigu perlu audit terpisah.");
+    }
+    if (additionalParent && (activeRelations || []).length > 2) {
+      throw new Error("Jumlah Parent melebihi batas alur manual. Review hubungan Family terlebih dahulu.");
+    }
 
     if (sameExisting && dependent.person.participant_type !== "DEPENDENT") {
       throw new Error("Hubungan Family existing tidak konsisten dengan profil Child. Perlu review manual.");
@@ -309,7 +324,7 @@ export async function POST(req: NextRequest) {
         company_id: company.id,
         parent_person_id: parentId,
         dependent_person_id: childId,
-        relationship_type: "CHILD",
+        relationship_type: additionalParent ? "GUARDIAN" : "CHILD",
         active: true,
         updated_at: now,
       }).select("id").single());
@@ -320,7 +335,7 @@ export async function POST(req: NextRequest) {
       parentHistoryPersonId: parentId,
       childHistoryPersonId: childId,
       alreadyLinked: Boolean(sameExisting),
-      message: sameExisting ? "Hubungan Family sudah terpasang." : "Hubungan Family berhasil disimpan.",
+      message: sameExisting ? "Hubungan Family sudah terpasang." : additionalParent ? "Parent tambahan berhasil ditautkan tanpa mengubah Parent utama." : "Hubungan Family berhasil disimpan.",
     });
   } catch (error: any) {
     // Best-effort compensation only for records created by THIS request.

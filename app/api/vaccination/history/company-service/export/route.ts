@@ -100,7 +100,7 @@ async function loadParentMap(supabase: any, dependentIds: number[]) {
     const result = await supabase
       .from("vaccination_person_relationships")
       .select(
-        "dependent_person_id,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_name,employee_id,nik,email,phone,birth_date)",
+        "dependent_person_id,relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_name,employee_id,nik,email,phone,birth_date)",
       )
       .in("dependent_person_id", ids)
       .eq("active", true);
@@ -111,7 +111,10 @@ async function loadParentMap(supabase: any, dependentIds: number[]) {
       const parent = Array.isArray(relation.parent)
         ? relation.parent[0]
         : relation.parent;
-      if (parent) map.set(Number(relation.dependent_person_id), parent);
+      if (parent) {
+        const childId = Number(relation.dependent_person_id);
+        if (!map.has(childId) || relation.relationship_type !== "GUARDIAN") map.set(childId, parent);
+      }
     }
   }
 

@@ -171,11 +171,15 @@ export async function GET(req: NextRequest) {
     ]);
     const parents = checked(parentLinks);
     const childrenLinks = checked(childLinks);
-    if (parents.length > 1 || childrenLinks.length > 100 || (parents.length && childrenLinks.length)) {
+    if (parents.length > 2 || childrenLinks.length > 100 || (parents.length && childrenLinks.length)) {
       return fail("Relasi Parent/Child tidak konsisten; perlu audit, tidak mengubah data.", 409);
     }
 
-    const parentRow = parents.length ? unpack(parents[0].parent) : null;
+    // Preserve the original CHILD relation as primary. A GUARDIAN is a confirmed
+    // second parent, not a reason to silently replace existing parent/registrations.
+    const orderedParents = [...parents].sort((a: any, b: any) =>
+      (a.relationship_type === "GUARDIAN" ? 1 : 0) - (b.relationship_type === "GUARDIAN" ? 1 : 0));
+    const parentRow = orderedParents.length ? unpack(orderedParents[0].parent) : null;
     if (parentRow && Number(parentRow.company_id) !== Number(company.id)) {
       return fail("Relasi Parent beda perusahaan; perlu audit.", 409);
     }
@@ -202,7 +206,9 @@ export async function GET(req: NextRequest) {
     return ok({
       status: parents.length || children.length ? "LINKED" : "NOT_LINKED",
       historyPersonId: personId,
-      family: { role, parent, children, siblings },
+      family: { role, parent, parents: orderedParents.map((relation: any) => ({
+        ...personSummary(unpack(relation.parent)), relationType: relation.relationship_type,
+      })).filter((item: any) => item?.id), children, siblings },
     });
   } catch (error: any) {
     return fail(String(error?.message || "Gagal memeriksa relasi Family."), 500);

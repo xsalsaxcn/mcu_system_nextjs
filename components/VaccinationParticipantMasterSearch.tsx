@@ -1004,6 +1004,8 @@ export default function VaccinationParticipantMasterSearch({
   const family = (familyStatus?.family && !familyVerifyError)
     ? familyStatus.family
     : (context?.family || { role: "", parent: null, children: [], siblings: [] });
+  const familyParents = Array.isArray(family?.parents) ? family.parents : (family?.parent ? [family.parent] : []);
+  const otherParents = familyParents.filter((parent: any) => Number(parent.id) !== Number(family?.parent?.id));
   const familyChildren = Array.isArray(family?.children) ? family.children : [];
   const familySiblings = Array.isArray(family?.siblings) ? family.siblings : [];
   const familyDisplayRows =
@@ -1522,6 +1524,15 @@ export default function VaccinationParticipantMasterSearch({
                       <button type="button" onClick={() => openIdentityEditor({ ...family.parent, historyPersonId: family.parent.id })}
                         disabled={identitySaving || !Number(family.parent.id || 0)}
                         className="mt-2 text-xs font-bold text-blue-700 underline disabled:opacity-30">Edit Identitas Parent</button>
+                      {otherParents.map((guardian: any) => (
+                        <button type="button" key={`additional-parent-${guardian.id}`}
+                          onClick={() => openRelatedPerson(guardian, "Parent")}
+                          disabled={loadingContext}
+                          className="mt-2 w-full rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-left hover:bg-violet-100 disabled:opacity-60">
+                          <div className="text-sm font-bold text-violet-950">{guardian.name || "-"} <span className="text-xs">(Parent tambahan)</span></div>
+                          <div className="text-xs text-slate-600">{guardian.employeeId || guardian.email || ""}</div>
+                        </button>
+                      ))}
                       </>
                     ) : (
                       <div className="mt-1 text-sm font-semibold text-slate-500">

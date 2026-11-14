@@ -163,12 +163,13 @@ async function resolveDependent(supabase: any, companyId: number, row: ManualHis
   if (existing) {
     const linked = await supabase
       .from("vaccination_person_relationships")
-      .select("parent_person_id")
+      .select("parent_person_id,relationship_type")
       .eq("company_id", companyId)
       .eq("dependent_person_id", existing.id)
       .eq("active", true);
     if (linked.error) throw new Error(linked.error.message);
-    const otherParent = (linked.data || []).find((item: any) => Number(item.parent_person_id) !== Number(parent.id));
+    const otherParent = (linked.data || []).find((item: any) =>
+      Number(item.parent_person_id) !== Number(parent.id) && item.relationship_type !== "GUARDIAN");
     if (otherParent) throw new Error("Anak dengan NIK tersebut sudah terhubung ke parent lain. Review relasi sebelum menambahkan akses parent baru.");
   }
 
@@ -185,6 +186,23 @@ async function resolveDependent(supabase: any, companyId: number, row: ManualHis
       .filter((item: any) => item?.id && historyNameKey(item.name_key || item.participant_name) === nameKey);
     if (matches.length > 1) throw new Error("Nama anak yang sama tercatat lebih dari satu kali pada parent ini. Tambahkan NIK anak untuk memastikan identitas.");
     existing = matches[0] || null;
+  }
+
+  // Do not let a legacy History import convert a second parent (GUARDIAN)
+  // into a primary Parent (CHILD) via the upsert below.
+  if (existing?.id) {
+    const existingLinks = await supabase.from("vaccination_person_relationships")
+      .select("parent_person_id,relationship_type")
+      .eq("company_id", companyId).eq("dependent_person_id", existing.id).eq("active", true);
+    if (existingLinks.error) throw new Error(existingLinks.error.message);
+    if ((existingLinks.data || []).some((relation: any) =>
+      Number(relation.parent_person_id) === Number(parent.id) && relation.relationship_type === "GUARDIAN")) {
+      throw new Error("Profil ini terhubung sebagai Parent tambahan. Import tidak boleh mengubahnya menjadi Parent utama.");
+    }
+    if ((existingLinks.data || []).some((relation: any) =>
+      Number(relation.parent_person_id) !== Number(parent.id) && relation.relationship_type !== "GUARDIAN")) {
+      throw new Error("Anak sudah punya Parent utama lain. Import tidak boleh mengubah Parent utama.");
+    }
   }
 
   const desired = personInsert(companyId, row);

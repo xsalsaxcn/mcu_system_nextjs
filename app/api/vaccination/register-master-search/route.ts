@@ -303,7 +303,7 @@ export async function GET(req: NextRequest) {
       const relationshipResult = await supabase
         .from("vaccination_person_relationships")
         .select(
-          "dependent_person_id,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)",
+          "dependent_person_id,relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)",
         )
         .in("dependent_person_id", dependentHistoryIds)
         .eq("active", true);
@@ -318,7 +318,9 @@ export async function GET(req: NextRequest) {
           parent?.active !== false &&
           String(parent?.participant_type || "").toUpperCase() === "EMPLOYEE"
         ) {
-          parentByDependent.set(Number(relation.dependent_person_id), parent);
+          const childId = Number(relation.dependent_person_id);
+          const old = parentByDependent.get(childId);
+          if (!old || relation.relationship_type !== "GUARDIAN") parentByDependent.set(childId, parent);
         }
       }
     }
