@@ -59,11 +59,13 @@ export async function GET(req: NextRequest) {
         .normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       if (!normalized || normalized !== normCompany) return [];
       const role = String(reg.family_role || "").trim().toUpperCase();
-      if (role !== "PARENT" && role !== "DEPENDENT") return [];
+      // Family role of a registration is not authoritative for employment or parenthood.
+      // Explicit selection is always revalidated by /family-bind before a write.
       if (!String(reg.participant_name || "").trim()) return [];
       return [{
         id: Number(reg.id), registration_id: Number(reg.id), source: "REGISTRATION",
-        participant_type: role === "PARENT" ? "EMPLOYEE" : "DEPENDENT",
+        participant_type: role === "DEPENDENT" ? "DEPENDENT" : role === "PARENT" ? "EMPLOYEE" : "UNVERIFIED",
+        family_role_source: role || "UNVERIFIED",
         participant_name: reg.participant_name, employee_id: reg.employee_id,
         nik: reg.nik, email: reg.email, parents: [],
       }];

@@ -287,7 +287,7 @@ async function searchUnlinkedOperationalRegistrations(
   if (token.length < 2) return [];
   const term = `%${token}%`;
   const result = await supabase.from("vaccination_registrations")
-    .select("id,session_id,participant_name,employee_id,nik,email,company_name,history_person_id,registered_at")
+    .select("id,session_id,participant_name,employee_id,nik,email,company_name,history_person_id,registered_at,validation_status,queue_status,bazar_queue_status")
     .or(`participant_name.ilike.${term},employee_id.ilike.${term},nik.ilike.${term},email.ilike.${term}`)
     .order("id", { ascending: false }).limit(101);
   if (result.error) throw new Error(result.error.message);
@@ -323,7 +323,7 @@ async function searchUnlinkedOperationalRegistrations(
   const ids = unlinked.map((r: any) => Number(r.id));
   const [itemsResult, recordsResult] = await Promise.all([
     supabase.from("vaccination_registration_items")
-      .select("id,registration_id,service_mode,status,active,vaccine:vaccination_vaccines(id,name,brand)")
+      .select("id,registration_id,service_mode,status,active,administered_record_id,vaccine:vaccination_vaccines(id,name,brand)")
       .in("registration_id", ids).eq("active", true),
     supabase.from("vaccination_records")
       .select("id,registration_id,status,vaccine_name,administered_at")
@@ -361,7 +361,8 @@ async function searchUnlinkedOperationalRegistrations(
         registration_id: regId, participant_name: registration.participant_name,
         employee_id: registration.employee_id, nik: registration.nik,
         email: registration.email, registration_count: 0,
-        benefit_count: 0, record_count: 0, benefit_names: [] as string[],
+        benefit_count: 0, record_count: 0, administered_record_count: 0, completed_item_count: 0, validation_done_count: 0,
+        validation_warnings: [] as string[], benefit_names: [] as string[],
         last_date: "", source_label: "Registrasi vaksinasi (belum terhubung ke profil History)",
       };
       groups.set(key, group);
@@ -369,6 +370,19 @@ async function searchUnlinkedOperationalRegistrations(
     group.registration_count += 1;
     group.benefit_count += items.length;
     group.record_count += records.length;
+    // These are three separate facts: queue/validation DONE, item completion,
+    // and independently recorded ADMINISTERED clinical events.
+    const terminal = new Set(["DONE", "FINISHED", "ADMINISTERED", "SELESAI"]);
+    const isDone = [registration.validation_status, registration.queue_status, registration.bazar_queue_status]
+      .some((status) => terminal.has(historyText(status).toUpperCase()));
+    const doneItems = items.filter((item: any) => terminal.has(historyText(item.status).toUpperCase()));
+    const administeredRecords = records.filter((record: any) => historyText(record.status).toUpperCase() === "ADMINISTERED");
+    group.completed_item_count += doneItems.length;
+    group.administered_record_count += administeredRecords.length;
+    if (isDone || doneItems.length) {
+      group.validation_done_count += 1;
+      if (!administeredRecords.length) group.validation_warnings.push(`Registrasi #${regId}: DONE tanpa record ADMINISTERED yang ditemukan.`);
+    }
     for (const item of items) {
       const v = Array.isArray(item.vaccine) ? item.vaccine[0] : item.vaccine;
       const value = historyText(v?.name);
@@ -585,6 +599,24 @@ export async function GET(req: NextRequest) {
       const benefits = systemBenefitsForPerson(person, parent, systemRows);
       const validation = validationSummaryForPerson(person, parent, systemRows);
       const services = mergeServices([...historical, ...benefits, ...current]);
+      let spouses: any[] = [];
+      // Optional V6341 table. A missing schema does not break the History page.
+      const spouseRows = await supabase.from("vaccination_family_spouses_v6341")
+        .select("person_a_id,person_b_id")
+        .eq("company_id", companyId).eq("active", true)
+        .or(`person_a_id.eq.${personId},person_b_id.eq.${personId}`).limit(10);
+      if (spouseRows.error && spouseRows.error.code !== "42P01" &&
+          !/vaccination_family_spouses_v6341.*(schema cache|does not exist)/i.test(String(spouseRows.error.message || ""))) {
+        throw new Error(spouseRows.error.message);
+      }
+      if (!spouseRows.error && spouseRows.data?.length) {
+        const ids = spouseRows.data.map((link: any) => Number(link.person_a_id) === personId ? Number(link.person_b_id) : Number(link.person_a_id));
+        const candidates = await supabase.from("vaccination_persons")
+          .select("id,participant_name,employee_id")
+          .eq("company_id", companyId).eq("active", true).in("id", ids);
+        if (candidates.error) throw new Error(candidates.error.message);
+        spouses = candidates.data || [];
+      }
 
       return ok({
         company,
@@ -592,6 +624,7 @@ export async function GET(req: NextRequest) {
         parent,
         parents,
         dependents,
+        spouses,
         historical,
         current,
         benefits,
