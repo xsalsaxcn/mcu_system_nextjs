@@ -573,11 +573,11 @@ export default function VaccinationRegisterPage() {
 
   const activeQueueView = healthdayBazarEnabled && form.serviceMode === "BAZAR" ? "BAZAR" : "HEALTHDAY";
 
-  // V633.8: Session 192 Bazar display only; never alter registration,
-  // inventory, payment, queue state, or other sessions. A real Bazar item
-  // is required, regardless of a stale BAZAR/COMBINATION registration flag.
-  function hasSession192BazarItem(registration: any) {
-    if (Number(form.sessionId) !== 192) return true;
+  // V6344: presentation-only for every combined Healthday–Bazar session.
+  // A Bazar row must have an active Bazar item. Never infer Bazar from a
+  // stale registration flag, a Healthday item, or legacy vaccine_id alone.
+  // Do not mutate registration, clinical records, inventory, payment or queues.
+  function hasActiveBazarItem(registration: any) {
     return (Array.isArray(registration?.items) ? registration.items : []).some((item: any) =>
       item?.active !== false && String(item?.service_mode || "").toUpperCase() === "BAZAR",
     );
@@ -591,7 +591,7 @@ export default function VaccinationRegisterPage() {
         ? serviceHasTrack(serviceStatus, "B")
         : serviceHasTrack(serviceStatus, "A");
       if (!hasTrack) return false;
-      if (activeQueueView === "BAZAR" && !hasSession192BazarItem(registration)) return false;
+      if (activeQueueView === "BAZAR" && !hasActiveBazarItem(registration)) return false;
       const trackUsesInternalQueue = activeQueueView === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled;
       if (!trackUsesInternalQueue) return true;
       return activeQueueView === "BAZAR"
@@ -644,7 +644,7 @@ export default function VaccinationRegisterPage() {
       ? sortedRegistrations.filter((registration: any) =>
           (!healthdayBazarEnabled || serviceHasTrack(
             registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A",
-          )) && (activeQueueView !== "BAZAR" || hasSession192BazarItem(registration)),
+          )) && (activeQueueView !== "BAZAR" || hasActiveBazarItem(registration)),
         )
       : queueReadyRegistrations;
     return searchRows.filter((registration: any) => {
@@ -2832,7 +2832,7 @@ export default function VaccinationRegisterPage() {
                   if (healthdayBazarEnabled && !serviceHasTrack(
                     registration?.patient_service_status, activeQueueView === "BAZAR" ? "B" : "A",
                   )) return null;
-                  if (activeQueueView === "BAZAR" && !hasSession192BazarItem(registration)) return null;
+                  if (activeQueueView === "BAZAR" && !hasActiveBazarItem(registration)) return null;
                   const info = statusInfo(registration.queue_status);
                   const bazarInfo = statusInfo(registration.bazar_queue_status);
                   const allItems = Array.isArray(registration.items) ? registration.items : [];
