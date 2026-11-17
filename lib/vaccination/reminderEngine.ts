@@ -5,6 +5,7 @@ import {
   vaccinationReminderWhatsAppConfigured,
 } from "@/lib/vaccination/reminderWhatsApp";
 import { resolveRegistrationReminderPhones } from "@/lib/vaccination/reminderPhone";
+import { readReminderControlV6345, reminderEnabledV6345 } from "@/lib/vaccination/reminderControlV6345";
 
 export const REMINDER_STAGES = [
   { stage: "H7", daysBefore: 7 },
@@ -438,13 +439,15 @@ export async function sendDueVaccinationReminders(
   limit = 200,
   policy: "legacy" | "automatic_today" = "legacy",
 ) {
+  const settings = await readReminderControlV6345(supabase);
+  if (settings.paused) return { today, claimed: 0, sent: 0, failed: 0, skipped: 0, paused: true, results: [] };
   let rows: any[] = [];
   if (policy === "automatic_today") {
     // V588: automatic jobs send ONLY today's eligible, never previously FAILED,
     // never a previous day's stage, and never re-send an unknown in-flight attempt.
     // Existing manual actions retain their legacy behavior unchanged.
     const batchLimit = Math.min(Math.max(Number(limit || 3), 1), 3);
-    const candidates = await supabase
+    let candidatesQuery = supabase
       .from("vaccination_reminders")
       .select("id,status,attempt_count,reminder_date,next_due_date")
       .eq("reminder_date", today)
@@ -452,11 +455,18 @@ export async function sendDueVaccinationReminders(
       .eq("status", "PENDING")
       .eq("attempt_count", 0)
       .is("superseded_at", null)
-      .order("id", { ascending: true })
-      .limit(batchLimit * 8);
+      .in("reminder_stage", settings.stages);
+    if (settings.companies.length) candidatesQuery = candidatesQuery.in("company_name", settings.companies);
+    if (settings.vaccines.length) candidatesQuery = candidatesQuery.in("vaccine_name", settings.vaccines);
+    const candidates = await candidatesQuery.order("id", { ascending: true }).limit(batchLimit * 8);
     if (candidates.error) throw new Error(candidates.error.message);
     for (const candidate of candidates.data || []) {
       if (rows.length >= batchLimit) break;
+      // First fetch metadata for eligibility; never claim a row outside admin filters.
+      const meta = await supabase.from("vaccination_reminders")
+        .select("id,reminder_stage,company_name,vaccine_name").eq("id", candidate.id).maybeSingle();
+      if (meta.error) throw new Error(meta.error.message);
+      if (!reminderEnabledV6345(settings, meta.data)) continue;
       // Compare-and-swap claim: concurrent GitHub/Vercel workers cannot claim
       // the same row. Do not reset stale SENDING to FAILED automatically.
       const claimed = await supabase
@@ -504,6 +514,19 @@ export async function sendDueVaccinationReminders(
   const results: any[] = [];
 
   for (const row of rows) {
+    const currentControl = await readReminderControlV6345(supabase);
+    if (!reminderEnabledV6345(currentControl, row)) {
+      // Unattempted claim may safely return to pending for automatic mode.
+      if (policy === "automatic_today") {
+        await supabase.from("vaccination_reminders").update({ status: "PENDING", attempt_count: 0, updated_at: new Date().toISOString() })
+          .eq("id", row.id).eq("status", "SENDING").eq("attempt_count", 1);
+      } else {
+        await supabase.from("vaccination_reminders").update({ status: "PENDING", attempt_count: Math.max(0, Number(row.attempt_count || 1) - 1), updated_at: new Date().toISOString() })
+          .eq("id", row.id).eq("status", "SENDING");
+      }
+      skipped++; results.push({ id: row.id, status: "CONTROLLED_STOP" });
+      continue;
+    }
     const email = validEmail(row.recipient_email || row.participant_email);
     if (!email) {
       skipped += 1;
@@ -531,6 +554,8 @@ export async function sendDueVaccinationReminders(
         reminderStage: clean(row.reminder_stage),
         companyName: clean(row.company_name),
         recipientType: clean(row.recipient_type),
+        customSubject: currentControl.emailSubject,
+        customBody: currentControl.emailBody,
       });
 
       sent += 1;
@@ -571,6 +596,10 @@ export async function sendDueVaccinationReminderWhatsApp(
   policy: "legacy" | "automatic_today" = "legacy",
 ) {
   const configured = vaccinationReminderWhatsAppConfigured();
+  const settings = await readReminderControlV6345(supabase);
+  if (settings.paused) {
+    return { configured, today, claimed: 0, sent: 0, failed: 0, skipped: 0, paused: true, results: [] };
+  }
   if (!configured) {
     return {
       configured: false,
@@ -605,9 +634,14 @@ export async function sendDueVaccinationReminderWhatsApp(
     .select(
       "id,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,recipient_name,recipient_phone,recipient_type,company_name,status,wa_status,wa_attempt_count,wa_sent_at",
     )
-    .in("reminder_stage", ["H3", "H1"])
+    .in("reminder_stage", ["H3", "H1"].filter((stage) => settings.stages.includes(stage)))
     .is("superseded_at", null)
     .neq("status", "CANCELLED");
+  if (!settings.stages.some((stage) => ["H3", "H1"].includes(stage))) {
+    return { configured, today, claimed: 0, sent: 0, failed: 0, skipped: 0, results: [] };
+  }
+  if (settings.companies.length) dueQuery = dueQuery.in("company_name", settings.companies);
+  if (settings.vaccines.length) dueQuery = dueQuery.in("vaccine_name", settings.vaccines);
   if (policy === "automatic_today") {
     dueQuery = dueQuery
       .eq("reminder_date", today)
@@ -635,6 +669,10 @@ export async function sendDueVaccinationReminderWhatsApp(
   const results: any[] = [];
 
   for (const row of dueResult.data || []) {
+    const liveControl = await readReminderControlV6345(supabase);
+    if (!reminderEnabledV6345(liveControl, row)) {
+      skipped++; results.push({ id: row.id, status: "CONTROLLED_STOP" }); continue;
+    }
     const phone = vaccinationReminderRecipientPhone(row.recipient_phone);
     if (!phone) {
       skipped += 1;
@@ -678,6 +716,13 @@ export async function sendDueVaccinationReminderWhatsApp(
     }
     if (!claim.data) continue;
     claimed += 1;
+    const afterClaim = await readReminderControlV6345(supabase);
+    if (!reminderEnabledV6345(afterClaim, row)) {
+      await supabase.from("vaccination_reminders")
+        .update({ wa_status: "PENDING", wa_attempt_count: Number(row.wa_attempt_count || 0), updated_at: new Date().toISOString() })
+        .eq("id", row.id).eq("wa_status", "SENDING").eq("wa_attempt_count", attemptCount);
+      skipped++; results.push({ id: row.id, status: "CONTROLLED_STOP" }); continue;
+    }
 
     const result = await sendVaccinationReminderWhatsApp({
       phone,

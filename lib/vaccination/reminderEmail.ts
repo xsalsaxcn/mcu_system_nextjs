@@ -76,6 +76,8 @@ export async function sendVaccinationReminderEmail(params: {
   reminderStage: string;
   companyName?: string;
   recipientType?: string;
+  customSubject?: string;
+  customBody?: string;
 }) {
   if (!vaccinationReminderSmtpConfigured()) {
     throw new Error("SMTP email belum dikonfigurasi lengkap.");
@@ -137,11 +139,24 @@ export async function sendVaccinationReminderEmail(params: {
     </div>
   </div>`;
 
+  // Custom texts support allowlisted tokens; all replacement values are escaped for HTML.
+  const placeholders: Record<string, string> = {
+    "{recipient}": recipientName, "{participant}": participantName,
+    "{vaccine}": serviceName, "{date}": dueText,
+    "{company}": companyName, "{stage}": clean(params.reminderStage),
+  };
+  const interpolate = (value: string) => value.replace(/\{(?:recipient|participant|vaccine|date|company|stage)\}/g,
+    (token) => placeholders[token] || "");
+  const customBody = clean(params.customBody);
+  const finalText = customBody ? interpolate(customBody) : text;
+  const finalHtml = customBody
+    ? `<div style="font-family:Arial,sans-serif;padding:24px;white-space:pre-wrap;line-height:1.5">${escapeHtml(finalText)}</div>`
+    : html;
   await transporter.sendMail({
     from: `inHARMONY Clinic <${smtpUser}>`,
     to: params.to,
-    subject: "Pengingat Jadwal Layanan Vaksinasi - inHARMONY",
-    text,
-    html,
+    subject: interpolate(clean(params.customSubject) || "Pengingat Jadwal Layanan Vaksinasi - inHARMONY"),
+    text: finalText,
+    html: finalHtml,
   });
 }

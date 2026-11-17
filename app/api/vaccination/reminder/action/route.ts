@@ -7,6 +7,7 @@ import {
   vaccinationReminderWhatsAppConfigured,
 } from "@/lib/vaccination/reminderWhatsApp";
 import { resolveReminderPhoneForRow } from "@/lib/vaccination/reminderPhone";
+import { readReminderControlV6345, reminderEnabledV6345 } from "@/lib/vaccination/reminderControlV6345";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +86,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const reminderControl = await readReminderControlV6345(supabase);
+    if (!reminderEnabledV6345(reminderControl, row)) {
+      return fail(reminderControl.paused ? "Reminder sedang dihentikan Admin." : "Reminder tidak termasuk pengaturan tahap/perusahaan/vaksin aktif.", 423);
+    }
     if (["CANCELLED", "SUPERSEDED"].includes(status)) {
       return fail("Reminder ini sudah tidak aktif dan tidak dapat dikirim.", 409);
     }
@@ -138,6 +143,9 @@ export async function POST(req: NextRequest) {
       if (markSending.error) throw new Error(markSending.error.message);
 
       try {
+        if (!reminderEnabledV6345(await readReminderControlV6345(supabase), row)) {
+          throw new Error("Reminder dihentikan oleh Admin sebelum email dikirim.");
+        }
         await sendVaccinationReminderEmail({
           to: email,
           recipientName: clean(row.recipient_name),
@@ -147,6 +155,8 @@ export async function POST(req: NextRequest) {
           reminderStage,
           companyName: clean(row.company_name),
           recipientType: clean(row.recipient_type),
+          customSubject: reminderControl.emailSubject,
+          customBody: reminderControl.emailBody,
         });
 
         const sentAt = new Date().toISOString();
@@ -232,6 +242,9 @@ export async function POST(req: NextRequest) {
           .is("superseded_at", null);
         if (markWaSending.error) throw new Error(markWaSending.error.message);
 
+        if (!reminderEnabledV6345(await readReminderControlV6345(supabase), row)) {
+          throw new Error("Reminder dihentikan oleh Admin sebelum WhatsApp dikirim.");
+        }
         const result = await sendVaccinationReminderWhatsApp({
           phone,
           recipientName: clean(row.recipient_name),

@@ -236,6 +236,74 @@ export default function VaccinationReminderPage() {
   const [listDisplay, setListDisplay] = useState<"SIMPLE" | "TABLE">("SIMPLE");
   const [page, setPage] = useState(1);
   const pageSize = 25;
+  // V6345 reminder control: explicit admin actions, never auto-sends on selection.
+  const [controlPanel, setControlPanel] = useState(false);
+  const [controlPayload, setControlPayload] = useState<any>(null);
+  const [controlDraft, setControlDraft] = useState<any>(null);
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlError, setControlError] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [vaccineFilter, setVaccineFilter] = useState("");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  async function loadControl() {
+    try {
+      const response = await fetch(`/api/vaccination/reminder/settings?cb=${Date.now()}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+      setControlPayload(payload);
+      setControlDraft({
+        stages: [...(payload.settings?.stages || ["H7", "H3", "H1", "H0"])],
+        companies: [...(payload.settings?.companies || [])],
+        vaccines: [...(payload.settings?.vaccines || [])],
+        emailSubject: payload.settings?.emailSubject || "",
+        emailBody: payload.settings?.emailBody || "",
+      });
+      setControlError("");
+    } catch (e: any) { setControlError(String(e?.message || e)); }
+  }
+
+  async function changeControl(operation: "pause" | "resume" | "save") {
+    if (controlBusy || !controlPayload?.settings?.available) return;
+    const prompt = operation === "pause"
+      ? "STOP SEMUA pengiriman reminder otomatis dan manual? Pesan yang sudah diproses tidak dapat ditarik kembali."
+      : operation === "resume"
+        ? "Aktifkan kembali pengiriman reminder untuk jadwal yang masih memenuhi aturan?"
+        : "Simpan aturan reminder? Perubahan tidak mengubah jadwal dosis klinis.";
+    if (!window.confirm(prompt)) return;
+    setControlBusy(true);
+    try {
+      const response = await fetch("/api/vaccination/reminder/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation, ...(operation === "save" ? controlDraft : {}) }), cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+      await loadControl();
+      setManualMessage(operation === "pause" ? "Reminder dihentikan. Pengiriman yang sudah terlanjur berjalan mungkin masih selesai." :
+        operation === "resume" ? "Reminder diaktifkan kembali." : "Aturan reminder tersimpan.");
+    } catch (e: any) { setControlError(String(e?.message || e)); }
+    finally { setControlBusy(false); }
+  }
+
+  async function cancelSelectedReminders() {
+    if (!selectedIds.length || controlBusy || !controlPayload?.settings?.available) return;
+    if (!window.confirm(`Batalkan ${selectedIds.length} jadwal yang dipilih? Yang sudah SENT / SENDING akan dilewati. Ini tidak menarik pesan yang telah terkirim.`)) return;
+    setControlBusy(true);
+    try {
+      const response = await fetch("/api/vaccination/reminder/bulk", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel", ids: selectedIds }), cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+      setSelectedIds([]);
+      setManualMessage(`Pembatalan: ${Number(payload?.counts?.cancelled || 0)} jadwal dibatalkan, ${Number(payload?.counts?.skipped || 0)} dilewati.`);
+      await load(selectedView, searchQuery);
+    } catch (e: any) { setControlError(String(e?.message || e)); }
+    finally { setControlBusy(false); }
+  }
 
   async function load(view: ViewKey = selectedView, query: string = searchQuery) {
     const requestSeq = ++summaryRequestSeq.current;
@@ -427,6 +495,10 @@ export default function VaccinationReminderPage() {
     }
   }
 
+  useEffect(() => { loadControl(); /* V6345: read-only load, no send */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     loadCurrentEvent(eventSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,9 +518,10 @@ export default function VaccinationReminderPage() {
   const rows = useMemo(() => data?.items || [], [data]);
   const filteredRows = useMemo(() => {
     const query = clean(searchQuery).toLowerCase();
-    if (!query) return rows;
-
     return rows.filter((row: any) => {
+      if (companyFilter && clean(row.company_name) !== companyFilter) return false;
+      if (vaccineFilter && clean(row.vaccine_name) !== vaccineFilter) return false;
+      if (!query) return true;
       const haystack = [
         row?.participant_name,
         row?.company_name,
@@ -467,7 +540,7 @@ export default function VaccinationReminderPage() {
 
       return haystack.includes(query);
     });
-  }, [rows, searchQuery]);
+  }, [rows, searchQuery, companyFilter, vaccineFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -492,6 +565,11 @@ export default function VaccinationReminderPage() {
   const cardPageCount = Math.max(1, Math.ceil(combinedCards.length / pageSize));
   const visibleCardPage = Math.min(page, cardPageCount);
   const pagedCards = useMemo(() => combinedCards.slice((visibleCardPage - 1) * pageSize, visibleCardPage * pageSize), [combinedCards, visibleCardPage]);
+  const selectableLoadedIds = filteredRows.filter((row: any) => {
+    const status = clean(row.status).toUpperCase();
+    const waStatus = clean(row.wa_status).toUpperCase();
+    return !["SENT", "SENDING", "CANCELLED", "SUPERSEDED"].includes(status) && !["SENT", "SENDING"].includes(waStatus);
+  }).map((r: any) => Number(r.id)).filter(Boolean);
   const displayCount = listDisplay === "SIMPLE" ? combinedCards.length : filteredRows.length;
   const displayPage = listDisplay === "SIMPLE" ? visibleCardPage : currentPage;
   const displayTotalPages = listDisplay === "SIMPLE" ? cardPageCount : totalPages;
@@ -513,7 +591,7 @@ export default function VaccinationReminderPage() {
             </div>
             <div className="flex flex-wrap items-start gap-2">
               <button
-                onClick={() => { load(selectedView); loadCurrentEvent(eventSessionId); }}
+                onClick={() => { load(selectedView); loadCurrentEvent(eventSessionId); loadControl(); }}
                 disabled={loading || manualSending || Boolean(rowActionId)}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 disabled:opacity-40"
               >
@@ -540,7 +618,7 @@ export default function VaccinationReminderPage() {
               </button>
               <button
                 onClick={sendManualReminder}
-                disabled={manualSending || scheduleSyncing || Boolean(rowActionId)}
+                disabled={manualSending || scheduleSyncing || Boolean(rowActionId) || Boolean(controlPayload?.settings?.paused)}
                 className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {manualSending ? "Mengirim Reminder..." : "Kirim Reminder Manual"}
@@ -549,6 +627,93 @@ export default function VaccinationReminderPage() {
               </details>
             </div>
           </div>
+
+          {/* V6345 REMINDER CONTROL: no mutation until operator explicitly confirms. */}
+          <section className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black text-slate-900">Pengaturan & Kontrol Reminder</h2>
+                <p className="mt-1 text-xs text-slate-600">Email otomatis H-7, H-3, H-1, Hari H · WhatsApp otomatis H-3, H-1 · WIB</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-xl px-3 py-2 text-xs font-black ${controlPayload?.settings?.paused ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"}`}>
+                  {controlPayload?.settings?.available ? (controlPayload.settings.paused ? "STOP — pengiriman dijeda" : "Pengiriman aktif") : "Kontrol DB belum diaktifkan"}
+                </span>
+                {controlPayload?.settings?.available ? (
+                  <button type="button" disabled={controlBusy} onClick={() => changeControl(controlPayload.settings.paused ? "resume" : "pause")}
+                    className={`rounded-xl px-3 py-2 text-xs font-black text-white disabled:opacity-50 ${controlPayload.settings.paused ? "bg-emerald-700" : "bg-rose-700"}`}>
+                    {controlPayload.settings.paused ? "Lanjutkan Reminder" : "Stop Semua Reminder"}
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => setControlPanel((v) => !v)} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-800">
+                  {controlPanel ? "Tutup Pengaturan" : "Lihat / Edit Pengaturan"}
+                </button>
+              </div>
+            </div>
+            {controlError ? <p className="mt-2 text-xs font-bold text-rose-700">{controlError}</p> : null}
+            {!controlPayload?.settings?.available ? <p className="mt-2 text-xs text-amber-800">Pengaturan belum aktif di database. SQL migrasi V6345 harus diuji di staging dan disetujui; pengiriman lama tidak diubah oleh tombol ini.</p> : null}
+            {controlPanel ? (
+              <div className="mt-4 grid gap-4 rounded-2xl bg-white p-4 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <h3 className="text-sm font-black">Aturan Jadwal & Vaksin</h3>
+                  <p className="text-xs text-slate-500">Tanggal dosis klinis tidak diubah. Pengaturan ini hanya menentukan tahap pengiriman yang diizinkan.</p>
+                  <div className="flex flex-wrap gap-3">
+                    {(["H7", "H3", "H1", "H0"] as const).map((stage) => (
+                      <label key={stage} className="flex items-center gap-1 text-xs font-bold"><input type="checkbox"
+                        checked={Boolean(controlDraft?.stages?.includes(stage))}
+                        onChange={(event) => setControlDraft((d: any) => ({ ...d,
+                          stages: event.target.checked ? [...(d.stages || []), stage] : (d.stages || []).filter((s: string) => s !== stage),
+                        }))} />{stage === "H0" ? "Hari H" : stage.replace("H", "H-")}</label>
+                    ))}
+                  </div>
+                  <p className="text-xs font-bold">Perusahaan yang diizinkan</p>
+                  <label className="flex items-center gap-2 text-xs"><input type="checkbox"
+                    checked={!controlDraft?.companies?.length} onChange={() => setControlDraft((d: any) => ({ ...d, companies: [] }))} />Semua perusahaan</label>
+                  <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border p-2">
+                    {(controlPayload?.companies || []).map((company: string) => (
+                      <label key={company} className="flex items-center gap-2 text-xs"><input type="checkbox"
+                        checked={Boolean(controlDraft?.companies?.includes(company))}
+                        onChange={(event) => setControlDraft((d: any) => ({ ...d,
+                          companies: event.target.checked ? [...(d.companies || []), company] : (d.companies || []).filter((x: string) => x !== company),
+                        }))} />{company}</label>
+                    ))}
+                  </div>
+                  <p className="text-xs font-bold">Vaksin / layanan yang diizinkan</p>
+                  <label className="flex items-center gap-2 text-xs"><input type="checkbox"
+                    checked={!controlDraft?.vaccines?.length} onChange={() => setControlDraft((d: any) => ({ ...d, vaccines: [] }))} />Semua vaksin / layanan</label>
+                  <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border p-2">
+                    {(controlPayload?.vaccines || []).map((vaccine: string) => (
+                      <label key={vaccine} className="flex items-center gap-2 text-xs"><input type="checkbox"
+                        checked={Boolean(controlDraft?.vaccines?.includes(vaccine))}
+                        onChange={(event) => setControlDraft((d: any) => ({ ...d,
+                          vaccines: event.target.checked ? [...(d.vaccines || []), vaccine] : (d.vaccines || []).filter((x: string) => x !== vaccine),
+                        }))} />{vaccine}</label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <h3 className="text-sm font-black">Edit Kata-Kata Email Reminder</h3>
+                  <p className="text-xs text-slate-500">Kosong = teks Email bawaan. Gunakan {"{recipient}"}, {"{participant}"}, {"{vaccine}"}, {"{date}"}, {"{company}"}, {"{stage}"}.</p>
+                  <label className="block text-xs font-bold">Subjek Email</label>
+                  <input value={controlDraft?.emailSubject || ""} maxLength={150} placeholder="Pengingat jadwal vaksinasi - inHARMONY"
+                    onChange={(e) => setControlDraft((d: any) => ({ ...d, emailSubject: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 p-3 text-sm" />
+                  <label className="block text-xs font-bold">Isi Pesan Email</label>
+                  <textarea value={controlDraft?.emailBody || ""} maxLength={4000} rows={7}
+                    onChange={(e) => setControlDraft((d: any) => ({ ...d, emailBody: e.target.value }))}
+                    placeholder="Yth. {recipient},\nPengingat vaksin {vaccine} untuk {participant} pada {date}..."
+                    className="w-full rounded-xl border border-slate-200 p-3 text-sm" />
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <strong>WhatsApp:</strong> konten/template dikendalikan Notiva; belum bisa diedit bebas dari halaman ini. Tahap WhatsApp otomatis tetap H-3 dan H-1.
+                  </div>
+                </div>
+                <div className="lg:col-span-2 flex justify-end">
+                  <button type="button" onClick={() => changeControl("save")} disabled={controlBusy || !controlPayload?.settings?.available || !controlDraft?.stages?.length}
+                    className="rounded-xl bg-violet-700 px-5 py-2.5 text-sm font-black text-white disabled:opacity-40">{controlBusy ? "Menyimpan..." : "Simpan Pengaturan"}</button>
+                </div>
+              </div>
+            ) : null}
+          </section>
 
           <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 p-4">
             <div className="text-sm font-black text-sky-950">Cara pakai untuk operator</div>
@@ -778,6 +943,7 @@ export default function VaccinationReminderPage() {
               <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h2 className="text-lg font-black">{viewMeta.title}</h2>
+                  <p className="mt-1 text-xs text-slate-500">Filter & pilih peserta hanya memengaruhi daftar; tidak mengirim pesan.</p>
                   <p className="text-sm text-slate-500">{viewMeta.note}</p>
                   {selectedView === "INCOMING" ? (
                     <p className="mt-1 text-xs text-slate-500">Pencarian mencakup seluruh jadwal di database untuk 60 hari ke depan, bukan hanya 1.000 jadwal yang dimuat pertama.</p>
@@ -816,6 +982,20 @@ export default function VaccinationReminderPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-3">
                 <p className="text-xs text-slate-600">Tampilan sederhana tidak mengirim pesan otomatis. Klik “Periksa detail” bila memerlukan tindakan.</p>
                 <div className="flex rounded-xl border border-slate-200 p-1" role="group" aria-label="Pilih tampilan daftar reminder">
+                      <select aria-label="Filter perusahaan" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setPage(1); setSelectedIds([]); }}
+                        className="max-w-48 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs">
+                        <option value="">Semua Perusahaan</option>
+                        {(controlPayload?.companies || []).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <select aria-label="Filter vaksin" value={vaccineFilter} onChange={(e) => { setVaccineFilter(e.target.value); setPage(1); setSelectedIds([]); }}
+                        className="max-w-48 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs">
+                        <option value="">Semua Vaksin</option>
+                        {(controlPayload?.vaccines || []).map((v: string) => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                      <button type="button" aria-pressed={selectionMode} onClick={() => { setSelectionMode((v) => !v); setListDisplay("TABLE"); setSelectedIds([]); }}
+                        className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-800">
+                        {selectionMode ? "Tutup Pilihan" : "Pilih Peserta"}
+                      </button>
                   <button type="button" aria-pressed={listDisplay === "SIMPLE"} onClick={() => setListDisplay("SIMPLE")}
                     className={`rounded-lg px-3 py-2 text-xs font-bold ${listDisplay === "SIMPLE" ? "bg-sky-700 text-white" : "text-slate-600"}`}>
                     Kartu mudah dibaca
@@ -826,6 +1006,17 @@ export default function VaccinationReminderPage() {
                   </button>
                 </div>
               </div>
+              {selectionMode && listDisplay === "TABLE" ? (
+                <div className="flex flex-wrap items-center gap-2 border-b bg-violet-50 px-5 py-3 text-xs">
+                  <button type="button" onClick={() => setSelectedIds(selectableLoadedIds.slice(0, 1000))}
+                    className="rounded-lg border bg-white px-3 py-2 font-black">Pilih Semua yang Dimuat ({Math.min(selectableLoadedIds.length, 1000)})</button>
+                  <button type="button" onClick={() => setSelectedIds([])} className="rounded-lg border bg-white px-3 py-2">Hapus Pilihan</button>
+                  <span className="font-bold">{selectedIds.length} jadwal dipilih</span>
+                  <button type="button" disabled={!selectedIds.length || controlBusy || !controlPayload?.settings?.available}
+                    onClick={cancelSelectedReminders} className="rounded-lg bg-rose-700 px-3 py-2 font-black text-white disabled:opacity-40">Batalkan Reminder Terpilih</button>
+                  <span className="text-slate-500">Maks. 1000 jadwal dari hasil yang dimuat; bukan semua data database.</span>
+                </div>
+              ) : null}
               {listDisplay === "SIMPLE" ? (
                 <div className="space-y-3 bg-slate-50/60 p-4">
                   <p className="text-xs text-slate-600">Satu kartu per profil peserta dan vaksin, dengan seluruh dosis berikutnya dan tahap pengingat yang tercatat. Nama atau BINUSIAN ID yang sama tidak otomatis menggabungkan dua profil berbeda.</p>
@@ -861,7 +1052,7 @@ export default function VaccinationReminderPage() {
                                   const status = clean(row.status).toUpperCase();
                                   const waStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
                                   const busy = rowActionId === Number(row.id);
-                                  const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(waStatus);
+                                  const sendDisabled = busy || Boolean(controlPayload?.settings?.paused) || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(waStatus);
                                   const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || waStatus === "SENT";
                                   return (
                                     <div key={row.id} className="px-3 py-3 text-xs">
@@ -905,6 +1096,7 @@ export default function VaccinationReminderPage() {
                 <table className="min-w-[1100px] w-full table-fixed text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
                     <tr>
+                      {selectionMode ? <th className="px-2 py-3">Pilih</th> : null}
                       <th className="w-[14%] px-3 py-3">Peserta</th>
                       <th className="w-[11%] px-3 py-3">Perusahaan</th>
                       <th className="w-[12%] px-3 py-3">Layanan</th>
@@ -929,10 +1121,14 @@ export default function VaccinationReminderPage() {
                             : "NO_PHONE"
                           : rowWaStatus;
                       const busy = rowActionId === Number(row.id);
-                      const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(rowWaStatus);
+                      const sendDisabled = busy || Boolean(controlPayload?.settings?.paused) || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(rowWaStatus);
                       const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || rowWaStatus === "SENT";
                       return (
                         <tr key={row.id} className="align-top hover:bg-slate-50/70">
+                          {selectionMode ? <td className="px-2 py-3"><input type="checkbox" aria-label={`Pilih reminder ${row.id}`}
+                            disabled={!selectableLoadedIds.includes(Number(row.id))}
+                            checked={selectedIds.includes(Number(row.id))}
+                            onChange={(e) => setSelectedIds((current) => e.target.checked ? [...new Set([...current, Number(row.id)])] : current.filter((id) => id !== Number(row.id)))} /></td> : null}
                           <td className="break-words px-3 py-3 font-bold">{row.participant_name || "-"}</td>
                           <td className="break-words px-3 py-3 text-slate-600">{row.company_name || "-"}</td>
                           <td className="break-words px-3 py-3">
@@ -1023,7 +1219,7 @@ export default function VaccinationReminderPage() {
                     })}
                     {!loading && !filteredRows.length ? (
                       <tr>
-                        <td colSpan={10} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
+                        <td colSpan={selectionMode ? 11 : 10} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
                           {searchQuery ? `Tidak ada jadwal pada kategori ini untuk "${searchQuery}". Periksa juga peserta Done bila jadwalnya di luar rentang atau belum tersinkron.` : "Tidak ada data pada kategori ini."}
                         </td>
                       </tr>
