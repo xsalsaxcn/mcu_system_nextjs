@@ -1643,6 +1643,15 @@ export default function VaccinationMasterPage() {
     [serviceStockEditorLots, serviceStockEditorLotId],
   );
 
+  // V6349: Lifetime quota and physical stock are different concepts.
+  // This is the total received quantity for the Lot, not a number of new doses.
+  const selectedServiceStockTotalQty = selectedServiceStockLot
+    ? Math.max(0,
+        Number(selectedServiceStockLot.stock_initial || 0) +
+        Number(selectedServiceStockLot.stock_added || 0),
+      )
+    : 0;
+
   const selectedServiceStockRemaining = selectedServiceStockLot
     ? Math.max(
         0,
@@ -1685,9 +1694,19 @@ export default function VaccinationMasterPage() {
   };
   const selectedServiceStockUsedHealthday = serviceUsed("HEALTHDAY");
   const selectedServiceStockUsedBazar = serviceUsed("BAZAR");
+  const selectedServiceStockClinicalUsed = selectedServiceStockUsedHealthday + selectedServiceStockUsedBazar;
+  const selectedServiceStockMasterUsed = Number(selectedServiceStockLot?.stock_used || 0);
+  const selectedServiceStockUsageGap = selectedServiceStockClinicalUsed - selectedServiceStockMasterUsed;
   const selectedServiceStockUsageVerified = serviceStockUsageReady && !!selectedServiceStockLot &&
-    (selectedServiceStockUsedHealthday + selectedServiceStockUsedBazar) <= Number(selectedServiceStockLot.stock_used || 0) &&
+    selectedServiceStockUsageGap <= 0 &&
     Number(lotForm.stockSessionId || 0) !== 177;
+  // Allocations describe TOTAL lifetime quotas, not doses remaining to inject.
+  // N28 (80 initial, 80 Healthday quota) is fully allocated even though
+  // the legacy Master counter says 32 and clinical evidence says 60.
+  const selectedServiceStockUnallocatedQuota = Math.max(
+    0,
+    selectedServiceStockTotalQty - selectedServiceStockHealthday - selectedServiceStockBazar,
+  );
   const selectedServiceStockUsedCurrent = serviceStockEditorMode === "BAZAR"
     ? selectedServiceStockUsedBazar : selectedServiceStockUsedHealthday;
   const selectedServiceStockUsedOther = serviceStockEditorMode === "BAZAR"
@@ -1695,7 +1714,12 @@ export default function VaccinationMasterPage() {
   const selectedServiceStockOtherOpen = Math.max(0, selectedServiceStockOtherQty - selectedServiceStockUsedOther);
   const selectedServiceStockMaxQty = Math.max(
     0,
-    selectedServiceStockUsedCurrent + selectedServiceStockRemaining - selectedServiceStockOtherOpen,
+    Math.min(
+      // A lifetime quota cannot exceed the total original/received Lot quantity.
+      // Do not add remaining stock to already allocated doses a second time.
+      selectedServiceStockTotalQty - selectedServiceStockOtherQty,
+      selectedServiceStockUsedCurrent + selectedServiceStockRemaining - selectedServiceStockOtherOpen,
+    ),
   );
 
   const transferRemaining = transferLot
@@ -3356,6 +3380,7 @@ export default function VaccinationMasterPage() {
                         <div className="rounded-lg border bg-white p-2">
                           <div className="text-[11px] font-bold uppercase text-slate-500">Sisa Lot</div>
                           <div className="mt-1 text-sm font-black text-slate-900">{selectedServiceStockRemaining}</div>
+                          <div className="mt-1 text-[10px] text-amber-700">Menurut Master, bukan hasil hitung fisik</div>
                         </div>
                         <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
                           <div className="text-[11px] font-bold uppercase text-blue-600">Healthday</div>
@@ -3368,19 +3393,34 @@ export default function VaccinationMasterPage() {
                         <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
                           <div className="text-[11px] font-bold uppercase text-emerald-600">Belum Dialokasikan</div>
                           <div className="mt-1 text-sm font-black text-emerald-900">
-                            {Math.max(0, selectedServiceStockRemaining -
-                              Math.max(0, selectedServiceStockHealthday - selectedServiceStockUsedHealthday) -
-                              Math.max(0, selectedServiceStockBazar - selectedServiceStockUsedBazar))}
+                            {selectedServiceStockUnallocatedQuota}
                           </div>
+                          <div className="mt-1 text-[10px] text-emerald-800">Kuota dari stok total; bukan stok baru</div>
                         </div>
                       </div>
 
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
                         Alokasi adalah kuota TOTAL (termasuk dosis yang sudah diberikan), bukan hanya stok sisa.
                         Terpakai dari alokasi: Healthday {selectedServiceStockUsedHealthday}, Bazar {selectedServiceStockUsedBazar}.
-                        Sisa fisik {selectedServiceStockRemaining} tidak berubah saat kuota disimpan.
-                        {!selectedServiceStockUsageVerified ? " Data pemakaian belum terverifikasi; simpan ditahan." : ""}
+                        Sisa menurut Master {selectedServiceStockRemaining} (belum tentu sama dengan stok fisik).
+                        {selectedServiceStockUsageGap > 0 ? (
+                          <span className="mt-1 block font-bold text-red-700">
+                            SELISIH PEMAKAIAN: {selectedServiceStockClinicalUsed} dosis selesai pada layanan,
+                            tetapi Master mencatat {selectedServiceStockMasterUsed} (selisih {selectedServiceStockUsageGap}).
+                            Kuota yang sudah tersimpan tidak otomatis bertambah. Simpan ditahan sampai rekonsiliasi.
+                          </span>
+                        ) : !selectedServiceStockUsageVerified ? (
+                          <span className="mt-1 block">Data pemakaian belum terverifikasi atau Session dilindungi; simpan ditahan.</span>
+                        ) : null}
                       </div>
+                      {selectedServiceStockUnallocatedQuota === 0 && selectedServiceStockLot ? (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                          Kuota lot sudah dialokasikan seluruhnya:
+                          Healthday {selectedServiceStockHealthday} + Bazar {selectedServiceStockBazar}
+                          {` = ${selectedServiceStockHealthday + selectedServiceStockBazar}`} dari {selectedServiceStockTotalQty} dosis.
+                          Sisa menurut Master bukan tambahan kuota yang bisa dimasukkan ulang.
+                        </div>
+                      ) : null}
                       <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-3">
                         <div className="min-w-[220px] flex-1">
                           <div className="text-xs font-bold text-slate-600">
@@ -3389,7 +3429,8 @@ export default function VaccinationMasterPage() {
                           <div className="mt-2 flex items-center gap-2">
                             <button
                               type="button"
-                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700"
+                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700 disabled:opacity-40"
+                              disabled={!selectedServiceStockUsageVerified}
                               onClick={() => setServiceStockEditorQty((qty) => Math.max(0, qty - 1))}
                             >
                               −
@@ -3401,7 +3442,8 @@ export default function VaccinationMasterPage() {
                             />
                             <button
                               type="button"
-                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700"
+                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700 disabled:opacity-40"
+                              disabled={!selectedServiceStockUsageVerified}
                               onClick={() =>
                                 setServiceStockEditorQty((qty) => Math.min(selectedServiceStockMaxQty, qty + 1))
                               }
@@ -3410,7 +3452,8 @@ export default function VaccinationMasterPage() {
                             </button>
                             <button
                               type="button"
-                              className="h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-bold text-violet-700"
+                              className="h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-bold text-violet-700 disabled:opacity-40"
+                              disabled={!selectedServiceStockUsageVerified}
                               onClick={() => setServiceStockEditorQty(selectedServiceStockMaxQty)}
                             >
                               Max {selectedServiceStockMaxQty}
