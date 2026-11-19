@@ -1052,14 +1052,21 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, message: registrationStateResult.error?.message || "Registrasi tidak ditemukan." }, 404);
     }
     const registrationState = registrationStateResult.data;
-    if (Number(registrationState.session_id) !== 177 && ["SELESAI", "DONE", "VALIDATED", "CANCELLED", "CANCELED", "BATAL", "MOVE_TO_CLINIC", "SEND_TO_VALIDATION", "PENDING_VALIDATION"].includes(action)) {
+    // V6347: do not inspect only the registration-level Bazar flag here.
+    // A pending HEALTHDAY item may share the registration with paid/partly-administered
+    // BAZAR items; only an explicitly scoped, external Healthday DONE is eligible
+    // for an exemption below. All Bazar/legacy/undo/cancel guards remain intact.
+    const protectedBazarAction = Number(registrationState.session_id) !== 177 &&
+      ["SELESAI", "DONE", "VALIDATED", "CANCELLED", "CANCELED", "BATAL", "MOVE_TO_CLINIC", "SEND_TO_VALIDATION", "PENDING_VALIDATION"].includes(action);
+    let protectedBazarItems: any[] = [];
+    let hasProtectedBazar = false;
+    if (protectedBazarAction) {
       const bazarCount = await supabase.from("vaccination_registration_items")
         .select("id,status,administered_record_id")
         .eq("registration_id", rowId).eq("service_mode", "BAZAR").eq("active", true);
       if (bazarCount.error) return json({ ok: false, message: bazarCount.error.message }, 500);
-      if ((bazarCount.data || []).length > 1 || (bazarCount.data || []).some((item: any) => item.administered_record_id)) {
-        return json({ ok: false, message: "Transaksi Bazar multi-item / sudah ada suntikan. Gunakan Kelola Tindakan per item (V623); aksi layanan lama diblokir agar riwayat dan stok aman." }, 409);
-      }
+      protectedBazarItems = bazarCount.data || [];
+      hasProtectedBazar = protectedBazarItems.length > 1 || protectedBazarItems.some((item: any) => item.administered_record_id);
     }
 
     const sessionModeResult = await supabase
@@ -1074,6 +1081,36 @@ export async function POST(req: NextRequest) {
     const legacyQueue = flow?.queue !== false;
     const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
     const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
+
+    // V6347: Allow only a single, verified, unadministered HEALTHDAY item to
+    // proceed through the existing Healthday-only stock/record synchronizer.
+    // Session 177, internal queue, Bazar and broad legacy actions never bypass V623.
+    if (hasProtectedBazar) {
+      const scopedHealthdayDone = serviceMode === "HEALTHDAY" &&
+        !healthdayQueueEnabled && ["SELESAI", "DONE", "VALIDATED"].includes(action);
+      if (!scopedHealthdayDone) {
+        return json({ ok: false, message: "Transaksi Bazar multi-item / sudah ada suntikan. Gunakan Kelola Tindakan per item (V623); aksi layanan lama diblokir agar riwayat dan stok aman." }, 409);
+      }
+      if (body.confirmation !== "ADMINISTERED_CONFIRMED") {
+        return json({ ok: false, message: "Konfirmasi bahwa vaksin Healthday benar-benar sudah disuntik wajib sebelum DONE." }, 400);
+      }
+      const healthdayItemsResult = await supabase.from("vaccination_registration_items")
+        .select("id,vaccine_id,lot_id,status,administered_record_id,active,service_mode")
+        .eq("registration_id", rowId).eq("service_mode", "HEALTHDAY").eq("active", true);
+      if (healthdayItemsResult.error) {
+        return json({ ok: false, message: "Gagal memverifikasi item Healthday: " + healthdayItemsResult.error.message }, 503);
+      }
+      const healthdayItems: any[] = healthdayItemsResult.data || [];
+      if (healthdayItems.length !== 1) {
+        return json({ ok: false, message: "DONE Healthday campuran ditahan: harus tepat satu item aktif. Periksa item/lot dan gunakan alur tindakan per item." }, 409);
+      }
+      const healthdayItem = healthdayItems[0];
+      if (!toId(healthdayItem.vaccine_id) || !toId(healthdayItem.lot_id) ||
+          !["WAITING", "PENDING", "PENDING_VALIDATION"].includes(clean(healthdayItem.status).toUpperCase()) ||
+          healthdayItem.administered_record_id) {
+        return json({ ok: false, message: "DONE Healthday ditahan: item/lot sudah berubah, sudah memiliki record, atau belum siap untuk disuntik. Refresh sebelum tindakan." }, 409);
+      }
+    }
     const serviceSpecificExternal = Boolean(
       serviceMode &&
       ((serviceMode === "HEALTHDAY" && !healthdayQueueEnabled) || (serviceMode === "BAZAR" && !bazarQueueEnabled))

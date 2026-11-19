@@ -528,6 +528,12 @@ export default function VaccinationValidationPage() {
       setMessage("Untuk transaksi Bazar gunakan Kelola Tindakan per item. Tidak ada perubahan data.");
       return;
     }
+    // V6347: this is a clinical attestation, never a payment/queue completion.
+    const isExternalHealthdayDone = action === "DONE" &&
+      clean(row.validation_service_mode).toUpperCase() === "HEALTHDAY" && row.internal_queue_enabled === false;
+    if (isExternalHealthdayDone && !window.confirm(
+      `KONFIRMASI SUNTIKAN HEALTHDAY\n\n${row.patient_name || "Peserta"}\n${(row.products || []).filter((item) => clean(item.service_mode).toUpperCase() === "HEALTHDAY").map((item) => `${item.vaccine_name || "Vaksin"} · Lot ${item.lot_number || "-"}`).join("\n")}\n\nVaksin benar-benar sudah diberikan? Ini akan mencatat record klinis dan pemakaian stok HEALTHDAY saja, bukan pembayaran Bazar.`
+    )) return;
     v6322bMutationInFlight.current += 1;
     setMessage("Mengubah status...");
     try {
@@ -535,7 +541,8 @@ export default function VaccinationValidationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ id: row.id, action, actor, note, service_mode: row.validation_service_mode }),
+        body: JSON.stringify({ id: row.id, action, actor, note, service_mode: row.validation_service_mode,
+          confirmation: isExternalHealthdayDone ? "ADMINISTERED_CONFIRMED" : undefined }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.message || "Gagal update status.");
@@ -835,6 +842,12 @@ export default function VaccinationValidationPage() {
     }
     if (!targets.length) {
       setMessage("Pilih minimal satu peserta terlebih dahulu.");
+      return;
+    }
+    if (action === "DONE" && targets.some((row) =>
+      clean(row.validation_service_mode).toUpperCase() === "HEALTHDAY" &&
+      clean(row.raw?.patient_service_status).toUpperCase() === "COMBINATION")) {
+      setMessage("DONE massal untuk Healthday + Bazar tidak diizinkan. Konfirmasi suntikan tiap peserta dari tombol Done pada baris Healthday.");
       return;
     }
     let note = "";
