@@ -1138,7 +1138,9 @@ export default function VaccinationMasterPage() {
       return;
     }
 
-    if (!serviceStockUsageReady || !selectedServiceStockUsageVerified) {
+    // V6351: An already-persisted N28 quota can be acknowledged without writing stock.
+    // This is NOT a clinical DONE and does NOT reconcile the 28-dose discrepancy.
+    if (!serviceStockUsageReady || (!selectedServiceStockUsageVerified && !canConfirmExistingN28)) {
       setError("Data pemakaian per layanan belum tervalidasi. Refresh Master dan periksa Lot sebelum menyimpan.");
       return;
     }
@@ -1151,7 +1153,7 @@ export default function VaccinationMasterPage() {
     setSavingServiceStock(true);
     try {
       const json = await postMaster({
-        action: "save-session-service-stock",
+        action: canConfirmExistingN28 ? "confirm-session-service-stock" : "save-session-service-stock",
         lotId: selectedServiceStockLot.id,
         sessionId: lotForm.stockSessionId,
         companyName: lotForm.stockCompanyName,
@@ -1707,6 +1709,22 @@ export default function VaccinationMasterPage() {
     0,
     selectedServiceStockTotalQty - selectedServiceStockHealthday - selectedServiceStockBazar,
   );
+  // V6351 scoped: allow an explicitly read-only confirmation of an EXISTING quota.
+  // New/changed allocations remain locked when clinical doses exceed stock_used.
+  const canConfirmExistingN28 =
+    serviceStockReady && serviceStockUsageReady &&
+    !selectedServiceStockUsageVerified &&
+    Number(selectedServiceStockLot?.id || 0) === 60 &&
+    cleanText(selectedServiceStockLot?.lot_number).toUpperCase() === "N28" &&
+    Number(lotForm.stockSessionId || 0) === 185 &&
+    serviceStockEditorMode === "HEALTHDAY" &&
+    Number(serviceStockEditorQty || 0) === 80 &&
+    selectedServiceStockTotalQty === 80 &&
+    selectedServiceStockHealthday === 80 &&
+    selectedServiceStockBazar === 0 &&
+    selectedServiceStockUsedBazar === 0 &&
+    selectedServiceStockUsedHealthday <= 80 &&
+    selectedServiceStockUsedHealthday > selectedServiceStockMasterUsed;
   const selectedServiceStockUsedCurrent = serviceStockEditorMode === "BAZAR"
     ? selectedServiceStockUsedBazar : selectedServiceStockUsedHealthday;
   const selectedServiceStockUsedOther = serviceStockEditorMode === "BAZAR"
@@ -3421,6 +3439,13 @@ export default function VaccinationMasterPage() {
                           Sisa menurut Master bukan tambahan kuota yang bisa dimasukkan ulang.
                         </div>
                       ) : null}
+                      {canConfirmExistingN28 ? (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900">
+                          Alokasi N28 sudah tersimpan: Healthday 80, Bazar 0. Klik Selesai untuk mengonfirmasi data yang ada.
+                          Tidak menambah stok, mengubah kuota, atau menandai peserta sudah disuntik.
+                          Selisih 28 dosis tetap memerlukan rekonsiliasi terpisah.
+                        </div>
+                      ) : null}
                       <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-3">
                         <div className="min-w-[220px] flex-1">
                           <div className="text-xs font-bold text-slate-600">
@@ -3463,13 +3488,15 @@ export default function VaccinationMasterPage() {
 
                         <button
                           type="button"
-                          disabled={savingServiceStock || !serviceStockReady || !selectedServiceStockUsageVerified}
+                          disabled={savingServiceStock || !serviceStockReady || (!selectedServiceStockUsageVerified && !canConfirmExistingN28)}
                           onClick={saveSelectedServiceStock}
                           className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-bold text-white disabled:opacity-50"
                         >
                           {savingServiceStock
                             ? "Menyimpan..."
-                            : `Simpan Stok ${serviceStockEditorMode === "BAZAR" ? "Bazar" : "Healthday"}`}
+                            : canConfirmExistingN28
+                              ? "Selesai · Alokasi Sudah Tersimpan"
+                              : `Simpan Stok ${serviceStockEditorMode === "BAZAR" ? "Bazar" : "Healthday"}`}
                         </button>
                       </div>
                     </div>

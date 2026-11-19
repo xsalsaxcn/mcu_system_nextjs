@@ -1602,7 +1602,7 @@ export async function POST(req: NextRequest) {
     return ok({ message: "Mapping produk berhasil dihapus. Master vaksin dan lot tetap aman." });
   }
 
-  if (action === "save-session-service-stock") {
+  if (action === "save-session-service-stock" || action === "confirm-session-service-stock") {
     const lotId = toInt(body.lotId || body.id, 0);
     const sessionId = toInt(body.sessionId || body.stockSessionId, 0);
     const companyName = clean(body.companyName || body.stockCompanyName);
@@ -1676,6 +1676,29 @@ export async function POST(req: NextRequest) {
       else return fail("Ada layanan suntikan tidak dikenal. Alokasi ditahan.", 409);
     }
     const usedRecorded = Number(lot.stock_used || 0);
+    // V6351: N28 Session 185 only. Confirm EXISTING Healthday 80/Bazar 0
+    // without a write, because this allocation was already persisted.
+    // Never bypass the mismatch guard for new/changed allocations or clinical DONE.
+    if (action === "confirm-session-service-stock") {
+      const activeRows = allAllocations.data || [];
+      const alreadySaved = Number(sessionId) === 185 && Number(lotId) === 60 &&
+        clean(lot.lot_number).toUpperCase() === "N28" &&
+        Number(lot.stock_initial || 0) + Number(lot.stock_added || 0) === 80 &&
+        healthdayQty === 80 && bazarQty === 0 &&
+        usedBazar === 0 && usedHD <= 80 && usedHD > usedRecorded &&
+        activeRows.length === 1 &&
+        Number(activeRows[0].session_id || 0) === 185 &&
+        clean(activeRows[0].service_mode).toUpperCase() === "HEALTHDAY" &&
+        Number(activeRows[0].allocated_qty || 0) === 80;
+      if (!alreadySaved) {
+        return fail("Alokasi saat ini berubah atau tidak cocok. Refresh Master; perubahan stok tetap ditahan.", 409);
+      }
+      return ok({
+        message: "Alokasi lot N28 sudah tersimpan: Healthday 80, Bazar 0. Tidak ada perubahan stok/kuota/rekam suntikan. Selisih 28 dosis masih perlu rekonsiliasi.",
+        unchanged: true,
+        allocations: activeRows,
+      });
+    }
     if (usedHD + usedBazar > usedRecorded) {
       return fail("Pencatatan pemakaian Lot tidak konsisten dengan item klinis. Audit Inventory terlebih dahulu.", 409);
     }
