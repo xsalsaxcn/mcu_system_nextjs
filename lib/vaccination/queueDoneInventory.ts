@@ -57,8 +57,48 @@ async function validateSessionStockAccess(
       normalizeServiceMode(row.service_mode) === serviceMode,
   );
   if (!owned) {
+    // V6352: diagnostic read-only only. Never auto-switch lot, session, vaccine,
+    // allocation, or clinical record based on an identical visible batch number.
+    const lotId = Number(lot?.id || 0);
+    const registeredSessionId = Number(sessionId || 0);
+    const stockOwnerSessionId = Number(lot?.stock_session_id || 0);
+    const allocationsForLot = dedicatedRows
+      .map((row: any) => `${Number(row.session_id)}/${normalizeServiceMode(row.service_mode)}`)
+      .slice(0, 8).join(", ");
+    let matchingLotIds: number[] = [];
+    try {
+      const compatibleAllocations = await supabase
+        .from("vaccination_session_stock_allocations")
+        .select("lot_id,dedicated")
+        .eq("session_id", registeredSessionId)
+        .eq("service_mode", serviceMode)
+        .eq("active", true)
+        .limit(250);
+      if (!compatibleAllocations.error) {
+        const ids = Array.from(new Set((compatibleAllocations.data || [])
+          .filter((row: any) => row.dedicated !== false)
+          .map((row: any) => Number(row.lot_id || 0))
+          .filter((id: number) => id > 0)));
+        if (ids.length) {
+          const candidateLots = await supabase
+            .from("vaccination_vaccine_lots")
+            .select("id,lot_number,vaccine_id,stock_session_id")
+            .in("id", ids)
+            .eq("vaccine_id", Number(lot.vaccine_id || 0))
+            .eq("lot_number", String(lot.lot_number || ""))
+            .limit(20);
+          if (!candidateLots.error) matchingLotIds = (candidateLots.data || [])
+            .map((row: any) => Number(row.id || 0))
+            .filter((id: number) => id > 0 && id !== lotId);
+        }
+      }
+    } catch { /* Diagnostics must never bypass the original clinical guard. */ }
+    const hint = matchingLotIds.length
+      ? `Lot dengan batch/produk yang sama sudah dialokasikan di sesi ini dengan Lot ID: ${matchingLotIds.join(", ")}. Periksa ID Lot pada item peserta melalui Edit Produk; jangan pindahkan otomatis atau ulang DONE.`
+      : "Tidak ditemukan Lot ID alternatif dengan produk dan batch sama yang dialokasikan ke sesi ini. Periksa Session dan alokasi Master sebelum DONE.";
     throw new Error(
-      `Lot ${lot?.lot_number || "-"} tidak memiliki alokasi ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} untuk session ini.`,
+      `Lot ${lot?.lot_number || "-"} (ID ${lotId}) tidak memiliki alokasi ${serviceMode} untuk Session ${registeredSessionId}. ` +
+      `Pemilik lot: Session ${stockOwnerSessionId || "-"}; alokasi lot aktif: ${allocationsForLot || "-"}. ${hint}`,
     );
   }
 
