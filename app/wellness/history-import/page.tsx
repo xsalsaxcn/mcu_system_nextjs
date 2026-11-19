@@ -38,6 +38,42 @@ const clinicalColumns = [
   ["Status Program", "Status awal/final program."],
 ];
 
+// WELLNESS_HISTORY_IMPORT_TEMPLATE_DOWNLOAD_V1
+// Canonical headers intentionally match aliases accepted by the existing API.
+const historyTemplateHeaders = [
+  "KODE",
+  "Nama Karyawan",
+  "Tanggal Periksa",
+  "NO. LAB",
+  "Jenis Kelamin",
+  "Departemen",
+  "Jabatan",
+  "Jenis History",
+  "Visit Label",
+  "Nama Grup",
+  "Risk Level",
+  "Selection Reason",
+  "HbA1c Raw",
+  "HbA1c %",
+  "HbA1c >6.4?",
+  "Tensi Raw",
+  "Sistolik",
+  "Diastolik",
+  "Tensi >150/100?",
+  "TB",
+  "BB",
+  "BMI",
+  "BMI >30?",
+  "Lingkar Perut",
+  "Gula Darah",
+  "Jumlah Kriteria",
+  "Risk Score",
+  "Fokus Intervensi",
+  "Monitoring Day-by-Day",
+  "Catatan Validasi Medis",
+  "Status Program",
+];
+
 type MappingTarget = {
   key: string;
   label: string;
@@ -219,6 +255,51 @@ function WellnessHistoryImport() {
       other: "Pemeriksaan Lain",
     };
     setVisitLabel(labelMap[value] || value);
+  }
+
+  function downloadHistoryTemplate() {
+    // WELLNESS_HISTORY_IMPORT_TEMPLATE_DOWNLOAD_V1
+    const worksheet = XLSX.utils.aoa_to_sheet([historyTemplateHeaders]);
+    worksheet["!cols"] = historyTemplateHeaders.map((header) => ({
+      wch: Math.max(14, Math.min(30, header.length + 4)),
+    }));
+
+    const guideRows = [
+      ["Kolom", "Wajib", "Keterangan"],
+      ...requiredColumns.map(([name, description]) => [name, "Ya", description]),
+      ...clinicalColumns.map(([name, description]) => [name, "Tidak", description]),
+    ];
+    const guideSheet = XLSX.utils.aoa_to_sheet(guideRows);
+    guideSheet["!cols"] = [{ wch: 28 }, { wch: 10 }, { wch: 70 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "History MCU");
+    XLSX.utils.book_append_sheet(workbook, guideSheet, "Petunjuk");
+    XLSX.writeFile(workbook, "template_history_pemeriksaan_wellness.xlsx");
+    setMessage("Template History Pemeriksaan berhasil didownload.");
+  }
+
+  function downloadSkippedRows() {
+    const rows = Array.isArray(result?.skippedRows) ? result.skippedRows : [];
+    if (!rows.length) return;
+
+    const worksheet = XLSX.utils.json_to_sheet(
+      rows.map((item: any) => ({
+        Baris: item?.rowNumber || "",
+        KODE: item?.employeeCode || "",
+        "Nama Karyawan": item?.participantName || "",
+        "Alasan Skip": item?.reason || "",
+      })),
+    );
+    worksheet["!cols"] = [
+      { wch: 10 },
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 70 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Skipped");
+    XLSX.writeFile(workbook, "history_pemeriksaan_skipped.xlsx");
   }
 
   async function autoMapping() {
@@ -411,7 +492,15 @@ function WellnessHistoryImport() {
               <span>Buat peserta baru bila KODE belum ditemukan. Default sebaiknya tidak dicentang supaya history tidak salah masuk peserta.</span>
             </label>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <button
+                type="button"
+                onClick={downloadHistoryTemplate}
+                disabled={loading || mappingLoading}
+                className="rounded-2xl bg-slate-900 px-4 py-4 text-sm font-black text-white shadow-sm disabled:opacity-60"
+              >
+                ↓ Download Template
+              </button>
               <button type="button" disabled={!file || mappingLoading || loading} onClick={autoMapping} className="rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-black text-white shadow-sm disabled:opacity-60">
                 {mappingLoading ? "Auto mapping..." : "Auto Mapping"}
               </button>
@@ -538,6 +627,50 @@ function WellnessHistoryImport() {
         ) : (
           <div className="rounded-3xl bg-slate-100 px-5 py-4 text-sm font-bold text-slate-700">Hasil import akan muncul di sini setelah proses selesai.</div>
         )}
+        {result?.skippedRows?.length ? (
+          <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-black text-amber-950">
+                  Data Skipped ({result.skippedRows.length})
+                </div>
+                <div className="mt-1 text-xs font-semibold text-amber-800">
+                  Baris berikut tidak diimport. Perbaiki KODE/Nama atau pencocokan peserta, lalu upload ulang bila diperlukan.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={downloadSkippedRows}
+                className="rounded-2xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white shadow-sm hover:bg-amber-700"
+              >
+                ↓ Download Data Skipped
+              </button>
+            </div>
+            <div className="mt-4 max-h-80 overflow-auto rounded-2xl bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 bg-amber-100 text-xs uppercase tracking-wide text-amber-900">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Baris</th>
+                    <th className="px-3 py-2 text-left">KODE</th>
+                    <th className="px-3 py-2 text-left">Nama</th>
+                    <th className="px-3 py-2 text-left">Alasan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {result.skippedRows.map((item: any, index: number) => (
+                    <tr key={`${item?.rowNumber || index}-${item?.employeeCode || ""}`}>
+                      <td className="px-3 py-2 font-black text-slate-900">{item?.rowNumber || "-"}</td>
+                      <td className="px-3 py-2 font-bold text-slate-700">{item?.employeeCode || "-"}</td>
+                      <td className="px-3 py-2 text-slate-700">{item?.participantName || "-"}</td>
+                      <td className="px-3 py-2 text-amber-900">{item?.reason || "Tidak diimport."}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
         {result?.missingParticipants?.length ? (
           <div className="mt-4 rounded-3xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
             <div className="font-black">Peserta belum ditemukan, contoh:</div>

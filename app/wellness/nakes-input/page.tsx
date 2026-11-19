@@ -99,6 +99,36 @@ function nakesBulkNormalizeCode(value: any) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+// WELLNESS_NAKES_TEMPLATE_SCOPE_CODE_RESOLVER_V1
+function nakesBulkParticipantCode(participant: any) {
+  return String(
+    participant?.code ??
+      participant?.employee_code ??
+      participant?.participant_code ??
+      participant?.no_karyawan ??
+      participant?.employee_no ??
+      participant?.employee_id ??
+      "",
+  ).trim();
+}
+
+function nakesBulkParticipantCompanyId(participant: any) {
+  return String(
+    participant?.company_id ??
+      participant?.wellness_company_id ??
+      "",
+  ).trim();
+}
+
+function nakesBulkNormalizeCompanyName(value: any) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.,;:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function nakesBulkHeader(value: any) {
   return String(value ?? "")
     .trim()
@@ -303,7 +333,7 @@ function participantName(participant: any) {
 }
 
 function participantLabel(participant: any) {
-  const code = clean(participant?.code);
+  const code = clean(nakesBulkParticipantCode(participant));
   const name = participantName(participant);
   const participantId = clean(participant?.id);
   const risk = clean(participant?.risk_cluster || participant?.baseline_risk_group);
@@ -324,7 +354,7 @@ function matchesSearch(participant: any, query: string) {
   if (!q) return true;
 
   const haystack = [
-    participant?.code,
+    nakesBulkParticipantCode(participant),
     participant?.name,
     participant?.participant_display_name,
     participant?.risk_cluster,
@@ -621,28 +651,45 @@ function WellnessNakesInput({
         : new URLSearchParams();
     const requestedCompanyId = clean(params.get("company_id"));
     const requestedCompanyName = clean(params.get("company_name"));
+    // WELLNESS_NAKES_TEMPLATE_SCOPE_CODE_RESOLVER_V1
+    // Company ID from the Company Portal link is authoritative. Company name
+    // is only a tolerant fallback because punctuation/casing may differ.
     const scopedParticipant =
       list.find(
         (participant: any) =>
           requestedCompanyId &&
-          String(participant.company_id || "") === requestedCompanyId,
+          nakesBulkParticipantCompanyId(participant) === requestedCompanyId,
       ) ||
       list.find(
         (participant: any) =>
           requestedCompanyName &&
-          clean(participant.company_name).toLowerCase() ===
-            requestedCompanyName.toLowerCase(),
+          nakesBulkNormalizeCompanyName(participant?.company_name) ===
+            nakesBulkNormalizeCompanyName(requestedCompanyName),
       ) ||
       null;
     const resolvedCompanyName = clean(
       scopedParticipant?.company_name || requestedCompanyName,
     );
-    const scopedList = resolvedCompanyName
+    const scopedListById = requestedCompanyId
       ? list.filter(
           (participant: any) =>
-            clean(participant.company_name) === resolvedCompanyName,
+            nakesBulkParticipantCompanyId(participant) === requestedCompanyId,
         )
-      : list;
+      : [];
+    const scopedListByName = resolvedCompanyName
+      ? list.filter(
+          (participant: any) =>
+            nakesBulkNormalizeCompanyName(participant?.company_name) ===
+            nakesBulkNormalizeCompanyName(resolvedCompanyName),
+        )
+      : [];
+    const scopedList = scopedListById.length
+      ? scopedListById
+      : scopedListByName.length
+        ? scopedListByName
+        : requestedCompanyId || resolvedCompanyName
+          ? []
+          : list;
 
     setCompanyScopeId(requestedCompanyId);
     setCompanyScopeName(resolvedCompanyName);
@@ -773,19 +820,37 @@ function WellnessNakesInput({
   }
 
   // WELLNESS_NAKES_TEMPLATE_MAPPING_IMPORT_V126M99_3
-  function nakesBulkScopedParticipants() {
-    const scoped = companyScopeName
+  function nakesBulkCompanyScopedParticipants() {
+    const scopedById = companyScopeId
       ? participants.filter(
           (participant: any) =>
-            clean(participant?.company_name) === clean(companyScopeName),
+            nakesBulkParticipantCompanyId(participant) === String(companyScopeId),
         )
-      : participants;
+      : [];
 
-    return scoped
-      .filter((participant: any) => nakesBulkNormalizeCode(participant?.code))
+    if (scopedById.length) return scopedById;
+
+    const scopedByName = companyScopeName
+      ? participants.filter(
+          (participant: any) =>
+            nakesBulkNormalizeCompanyName(participant?.company_name) ===
+            nakesBulkNormalizeCompanyName(companyScopeName),
+        )
+      : [];
+
+    if (scopedByName.length) return scopedByName;
+
+    return companyScopeId || companyScopeName ? [] : participants;
+  }
+
+  function nakesBulkScopedParticipants() {
+    return nakesBulkCompanyScopedParticipants()
+      .filter((participant: any) =>
+        nakesBulkNormalizeCode(nakesBulkParticipantCode(participant)),
+      )
       .sort((left: any, right: any) =>
-        nakesBulkNormalizeCode(left?.code).localeCompare(
-          nakesBulkNormalizeCode(right?.code),
+        nakesBulkNormalizeCode(nakesBulkParticipantCode(left)).localeCompare(
+          nakesBulkNormalizeCode(nakesBulkParticipantCode(right)),
           "id",
           { numeric: true },
         ),
@@ -801,7 +866,12 @@ function WellnessNakesInput({
     const scoped = nakesBulkScopedParticipants();
 
     if (!scoped.length) {
-      setBulkMessage("Tidak ada peserta dengan Kode Karyawan pada scope NAKES ini.");
+      const companyScopedCount = nakesBulkCompanyScopedParticipants().length;
+      setBulkMessage(
+        companyScopedCount
+          ? `${companyScopedCount} peserta ditemukan pada scope perusahaan, tetapi Kode Karyawan tidak terbaca pada payload peserta.`
+          : "Tidak ada peserta yang cocok dengan scope perusahaan NAKES ini.",
+      );
       return;
     }
 
@@ -814,7 +884,7 @@ function WellnessNakesInput({
       const headers = ["Kode Karyawan", "Nama Karyawan", "Usia", ...exam.headers];
       const rows = scoped.map((participant: any) => {
         const row: Record<string, any> = {
-          "Kode Karyawan": clean(participant?.code),
+          "Kode Karyawan": clean(nakesBulkParticipantCode(participant)),
           "Nama Karyawan": participantName(participant),
           // Prefill bila usia sudah tersedia di aplikasi; bila belum tersedia,
           // biarkan kosong agar NAKES mengisinya di template.
@@ -897,7 +967,9 @@ function WellnessNakesInput({
       const scoped = nakesBulkScopedParticipants();
       const participantsByCode = new Map<string, any[]>();
       for (const participant of scoped) {
-        const code = nakesBulkNormalizeCode(participant?.code);
+        const code = nakesBulkNormalizeCode(
+          nakesBulkParticipantCode(participant),
+        );
         if (!code) continue;
         const current = participantsByCode.get(code) || [];
         current.push(participant);
@@ -1576,7 +1648,10 @@ function WellnessNakesInput({
               </p>
             </div>
             <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-black text-emerald-800 ring-1 ring-emerald-100">
-              {participants.length} peserta tersedia
+              {companyScopeId || companyScopeName
+                ? nakesBulkCompanyScopedParticipants().length
+                : participants.length}{" "}
+              peserta tersedia
             </div>
           </div>
 

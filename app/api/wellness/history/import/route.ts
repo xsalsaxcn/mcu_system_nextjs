@@ -330,6 +330,14 @@ export async function POST(req: NextRequest) {
     let skipped = 0;
     const missingParticipants: string[] = [];
     const errors: string[] = [];
+    // WELLNESS_HISTORY_IMPORT_SKIP_DETAILS_V1
+    // Readable row-level audit only; successful import semantics stay unchanged.
+    const skippedRows: Array<{
+      rowNumber: number;
+      employeeCode: string;
+      participantName: string;
+      reason: string;
+    }> = [];
 
     for (const [offset, row] of dataRows.entries()) {
       const rowNumber = headerRowIndex + offset + 2;
@@ -338,6 +346,17 @@ export async function POST(req: NextRequest) {
       const participantName = clean(get("participant_name", ["Nama Karyawan", "Nama", "Nama Peserta", "Nama Lengkap", "Name"]));
       if (!employeeCode || !participantName) {
         skipped += 1;
+        skippedRows.push({
+          rowNumber,
+          employeeCode,
+          participantName,
+          reason:
+            !employeeCode && !participantName
+              ? "KODE dan Nama Karyawan kosong."
+              : !employeeCode
+                ? "KODE kosong."
+                : "Nama Karyawan kosong.",
+        });
         continue;
       }
 
@@ -378,6 +397,12 @@ export async function POST(req: NextRequest) {
 
       if (!participant?.id) {
         skipped += 1;
+        skippedRows.push({
+          rowNumber,
+          employeeCode,
+          participantName,
+          reason: "KODE tidak ditemukan pada peserta Wellness untuk perusahaan yang dipilih.",
+        });
         if (missingParticipants.length < 20) missingParticipants.push(`${employeeCode} - ${participantName}`);
         continue;
       }
@@ -452,6 +477,7 @@ export async function POST(req: NextRequest) {
       updatedBaseline,
       createdParticipants,
       skipped,
+      skippedRows,
       missingParticipants,
       errors,
       sheetName,
