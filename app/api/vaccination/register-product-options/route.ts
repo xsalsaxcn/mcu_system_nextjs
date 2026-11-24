@@ -403,6 +403,11 @@ export async function GET(req: NextRequest) {
     v6356MedanAllocated: null as number | null,
     v6356MedanFinalized: null as number | null,
     v6356MedanPhysicalRemaining: null as number | null,
+    // V6356R: independent read-only diagnostics for Formening 23 / lot 251.
+    v6356FormeningExactGate: "NOT_RUN",
+    v6356FormeningAllocated: null as number | null,
+    v6356FormeningFinalized: null as number | null,
+    v6356FormeningPhysicalRemaining: null as number | null,
   };
 
   if (serviceStock.enabled) {
@@ -700,6 +705,120 @@ export async function GET(req: NextRequest) {
           service_stock_remaining: remaining,
         });
         healthdayOptionDiagnostics.v6356MedanExactGate = "VERIFIED_RECOVERY";
+        healthdayOptionDiagnostics.eligibleAllocatedLots += 1;
+        healthdayOptionDiagnostics.ownedActiveLots += 1;
+      }
+    }
+  }
+  // V6356R MEDAN181 FORMENING ONLY: safe exact-lot recheck for a previously registered
+  // Healthday benefit. Read-only. Never invent allocation, reassign a Lot,
+  // alter a clinical record, or waive physical-stock/owner safeguards.
+  // Historical SQL audit: Session 181 / FORMENING 23 / Lot E3202409015 ID 251.
+  if (sessionId === 181 && serviceStock.enabled &&
+      !healthdayOptions.some((item: any) =>
+        Number(item.vaccine_id) === 23 && Number(item.lot_id) === 251)) {
+    const exactVaccineId = 23;
+    const exactLotId = 251;
+    const [recheckAlloc, recheckLot, recheckVaccine, recheckItems,
+      recheckMovements, recheckBazar] = await Promise.all([
+      supabase.from("vaccination_session_stock_allocations")
+        .select("lot_id,vaccine_id,allocated_qty,service_mode,active")
+        .eq("session_id", sessionId).eq("lot_id", exactLotId)
+        .eq("vaccine_id", exactVaccineId).eq("service_mode", "HEALTHDAY")
+        .eq("active", true).limit(100),
+      supabase.from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_scope,stock_session_id,active")
+        .eq("id", exactLotId).eq("active", true).maybeSingle(),
+      supabase.from("vaccination_vaccines")
+        .select("id,name,brand,price,price_category,active")
+        .eq("id", exactVaccineId).eq("active", true).maybeSingle(),
+      supabase.from("vaccination_registration_items")
+        .select("id,lot_id,service_mode,status,active")
+        .eq("session_id", sessionId).eq("lot_id", exactLotId)
+        .eq("active", true).limit(20000),
+      supabase.from("vaccination_inventory_movements")
+        .select("lot_id,movement_type,qty")
+        .eq("lot_id", exactLotId).limit(20000),
+      supabase.from("vaccination_session_stock_allocations")
+        .select("lot_id,allocated_qty,service_mode,active")
+        .eq("session_id", sessionId).eq("lot_id", exactLotId)
+        .eq("service_mode", "BAZAR").eq("active", true).limit(100),
+    ]);
+    const anyError = [recheckAlloc, recheckLot, recheckVaccine,
+      recheckItems, recheckMovements, recheckBazar]
+      .find((result: any) => result.error)?.error;
+    if (anyError) return fail(`V6356R: pemeriksaan lot Formening Medan gagal: ${anyError.message}`, 500);
+
+    const lot: any = recheckLot.data;
+    const vaccine: any = recheckVaccine.data;
+    const allocations: any[] = recheckAlloc.data || [];
+    const items: any[] = recheckItems.data || [];
+    const movements: any[] = recheckMovements.data || [];
+    const bazarAllocations: any[] = recheckBazar.data || [];
+    const allocated = Math.max(0, ...allocations.map((row: any) =>
+      Math.max(0, Number(row.allocated_qty || 0))));
+    // A DONE/FINISHED item is conservatively treated as used; do not create
+    // free stock by excluding a possibly completed clinical item.
+    const final = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
+    const healthdayUsed = items.filter((row: any) =>
+      normalizeServiceMode(row.service_mode) === "HEALTHDAY" &&
+      final.has(String(row.status || "").trim().toUpperCase())).length;
+    const bazarUsed = items.filter((row: any) =>
+      normalizeServiceMode(row.service_mode) === "BAZAR" &&
+      final.has(String(row.status || "").trim().toUpperCase())).length;
+    healthdayOptionDiagnostics.v6356FormeningAllocated = allocated;
+    healthdayOptionDiagnostics.v6356FormeningFinalized = healthdayUsed;
+    healthdayOptionDiagnostics.v6356FormeningExactGate = "RECHECK_PENDING";
+
+    // Pagination or duplicate/ambiguous allocation data is not proof of stock.
+    if (items.length >= 20000 || movements.length >= 20000 ||
+        allocations.length >= 100 || bazarAllocations.length >= 100) {
+      healthdayOptionDiagnostics.v6356FormeningExactGate = "RECHECK_TOO_MANY_ROWS";
+    } else if (!lot || !vaccine || allocations.length !== 1 ||
+        Number(lot.vaccine_id) !== exactVaccineId ||
+        Number(lot.stock_session_id || 0) !== sessionId ||
+        String(lot.stock_scope || "").trim().toUpperCase() !== "SESSION" ||
+        /(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(String(vaccine.name || ""))) {
+      healthdayOptionDiagnostics.v6356FormeningExactGate = "LOT_OR_OWNERSHIP_MISMATCH";
+    } else if (allocated <= 0 || allocated - healthdayUsed <= 0) {
+      healthdayOptionDiagnostics.v6356FormeningExactGate = "NO_UNUSED_HEALTHDAY_QUOTA";
+    } else {
+      const inbound = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
+      const outbound = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
+      let movementIn = 0;
+      let movementOut = 0;
+      for (const movement of movements) {
+        const type = String(movement.movement_type || "").trim().toUpperCase();
+        const qty = Math.abs(Number(movement.qty || 0));
+        if (!Number.isFinite(qty)) { movementOut = Number.POSITIVE_INFINITY; break; }
+        if (inbound.has(type)) movementIn += qty;
+        if (outbound.has(type)) movementOut += qty;
+      }
+      const bazarReserved = Math.max(0,
+        bazarAllocations.reduce((sum: number, row: any) =>
+          sum + Math.max(0, Number(row.allocated_qty || 0)), 0) - bazarUsed);
+      const physicalRemaining = Math.max(0,
+        Number(lot.stock_initial || 0) +
+        Math.max(Number(lot.stock_added || 0), movementIn) -
+        Number(lot.stock_used || 0) - movementOut);
+      const remaining = Math.max(0, Math.min(allocated - healthdayUsed,
+        physicalRemaining - bazarReserved));
+      healthdayOptionDiagnostics.v6356FormeningPhysicalRemaining = physicalRemaining;
+      if (!Number.isFinite(remaining) || remaining <= 0) {
+        healthdayOptionDiagnostics.v6356FormeningExactGate = "NO_PHYSICAL_UNRESERVED_STOCK";
+      } else {
+        healthdayOptions.push({
+          id: `healthday-medan181-exact-${exactVaccineId}-${exactLotId}`,
+          session_id: sessionId, vaccine_id: exactVaccineId,
+          lot_id: exactLotId, dose_number: 1, active: true,
+          vaccine, lot, service_mode: "HEALTHDAY",
+          option_source: "V6356R_FORMENING_EXACT_SESSION_OWNED_LOT_RECHECK",
+          sales_options: salesOffersByVaccine.get(exactVaccineId) || [],
+          service_stock_allocated: allocated,
+          service_stock_used: healthdayUsed,
+          service_stock_remaining: remaining,
+        });
+        healthdayOptionDiagnostics.v6356FormeningExactGate = "VERIFIED_RECOVERY";
         healthdayOptionDiagnostics.eligibleAllocatedLots += 1;
         healthdayOptionDiagnostics.ownedActiveLots += 1;
       }
